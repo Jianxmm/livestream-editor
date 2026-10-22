@@ -14,6 +14,7 @@ from build_source_review_index import build_source_review_index
 from audit_package import shared_errors, matching_review_rows
 from speaker_pipeline import validate_calibration, align_blocks, validate_input_binding
 from build_release import build, release_files
+from freeze_input_bundle import inspect_input_bundle
 
 class PortableTests(unittest.TestCase):
     def setUp(self):
@@ -39,6 +40,12 @@ class PortableTests(unittest.TestCase):
         with patch('workspace.duration',return_value=90):self.assertFalse(inspect_case(self.case)['errors'])
         (self.case/'inputs/02_带时间码原稿.md').write_text('发言人1 00:00\n修改')
         with patch('workspace.duration',return_value=90):self.assertTrue(inspect_case(self.case)['errors'])
+    def test_frozen_bundle_accepts_media_extension_and_uses_portable_paths(self):
+        frozen=inspect_input_bundle(self.case)
+        paths={item['path'] for item in frozen['files']}
+        self.assertIn('inputs/01_直播回放.wav',paths)
+        self.assertIn('inputs/02_带时间码原稿.md',paths)
+        self.assertTrue(all('\\' not in path and '/' in path for path in paths))
     def test_duplicate_route_evidence_is_not_five_checks(self):
         with self.assertRaises(ValueError):build_route(self.case,acoustic_speakers='1',evidence=['same']*5)
     def test_templates_bind_extension_and_preserve_edits(self):

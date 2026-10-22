@@ -8,6 +8,7 @@ from datetime import datetime
 import hashlib
 import json
 from pathlib import Path
+from route_livestream import find_replay
 
 
 MANIFEST = "_work/双轨输入清单.json"
@@ -32,12 +33,13 @@ def inspect_input_bundle(case_dir: Path) -> dict[str, object]:
             continue
         files.append(
             {
-                "path": str(path.relative_to(case_dir)),
+                "path": path.relative_to(case_dir).as_posix(),
                 "size": path.stat().st_size,
                 "sha256": sha256_file(path),
             }
         )
-    required = {"inputs/01_直播回放.mp4", "inputs/02_带时间码原稿.md"}
+    replay = find_replay(case_dir)
+    required = {replay.relative_to(case_dir).as_posix(), "inputs/02_带时间码原稿.md"}
     present = {str(item["path"]) for item in files}
     if not required.issubset(present):
         raise FileNotFoundError("双轨验证必须包含标准回放和带时间码原稿。")
