@@ -11,6 +11,7 @@ import json
 import re
 import shutil
 from pathlib import Path
+from route_livestream import file_sha256
 
 
 SOURCE = "inputs/02_带时间码原稿.md"
@@ -46,8 +47,8 @@ def freeze_baseline(case_dir: Path) -> dict[str, object]:
     manifest_path = baseline_dir / BASELINE_MANIFEST
     baseline_path = baseline_dir / BASELINE_DRAFT
     expected = {
-        "source_sha256": sha256_text(source),
-        "draft_sha256": sha256_text(draft),
+        "source_sha256": file_sha256(source_path),
+        "draft_sha256": file_sha256(draft_path),
     }
     if baseline_dir.exists():
         if manifest_path.is_file() and baseline_path.is_file():
@@ -55,7 +56,7 @@ def freeze_baseline(case_dir: Path) -> dict[str, object]:
             if (
                 existing.get("source_sha256") == expected["source_sha256"]
                 and existing.get("draft_sha256") == expected["draft_sha256"]
-                and sha256_text(baseline_path.read_text(encoding="utf-8-sig"))
+                and file_sha256(baseline_path)
                 == expected["draft_sha256"]
             ):
                 return existing
@@ -119,9 +120,9 @@ def summarize_human_review(
     source = source_path.read_text(encoding="utf-8-sig")
     before = baseline_path.read_text(encoding="utf-8-sig")
     after = draft_path.read_text(encoding="utf-8-sig")
-    if sha256_text(source) != manifest.get("source_sha256"):
+    if file_sha256(source_path) != manifest.get("source_sha256"):
         raise ValueError("原稿已在终审基线后变化，修改量不可比较。")
-    if sha256_text(before) != manifest.get("draft_sha256"):
+    if file_sha256(baseline_path) != manifest.get("draft_sha256"):
         raise ValueError("AI交付基线内容与manifest不一致。")
 
     before_clean = non_whitespace(before)
@@ -137,7 +138,7 @@ def summarize_human_review(
         for tag, i1, i2, j1, j2 in paragraph_matcher.get_opcodes()
         if tag != "equal"
     )
-    final_hash = sha256_text(after)
+    final_hash = file_sha256(draft_path)
     result: dict[str, object] = {
         "version": 1,
         "case": case_dir.name,

@@ -15,6 +15,9 @@ from audit_package import shared_errors, matching_review_rows
 from speaker_pipeline import validate_calibration, align_blocks, validate_input_binding
 from build_release import build, release_files
 from freeze_input_bundle import inspect_input_bundle
+from track_human_review import freeze_baseline, summarize_human_review
+from audit_draft import audit_human_review_metrics
+from register_validation_campaign import register_campaign
 
 class PortableTests(unittest.TestCase):
     def setUp(self):
@@ -46,6 +49,28 @@ class PortableTests(unittest.TestCase):
         self.assertIn('inputs/01_直播回放.wav',paths)
         self.assertIn('inputs/02_带时间码原稿.md',paths)
         self.assertTrue(all('\\' not in path and '/' in path for path in paths))
+    def test_crlf_bom_review_hashes_match_exact_input_bytes(self):
+        draft=self.case/'outputs/01_公众号可发布稿.md'
+        draft.write_bytes(('\ufeff# 技术测试\r\n正文。\r\n').encode('utf-8'))
+        freeze_baseline(self.case)
+        metrics=summarize_human_review(self.case,'测试编辑','2026-10-22',12)
+        self.assertEqual(metrics['source_sha256'],file_sha256(self.case/'inputs/02_带时间码原稿.md'))
+        self.assertEqual(metrics['final_draft_sha256'],file_sha256(draft))
+        report='- 终审人：测试编辑\n- 终审日期：2026-10-22\n- 人工终审耗时：12分钟\n'
+        self.assertEqual(audit_human_review_metrics(self.case,report),[])
+    def test_campaign_binds_raw_crlf_files_but_rejects_same_text(self):
+        cases=[]
+        for i in range(3):
+            case=self.root/f'campaign-{i}';(case/'inputs').mkdir(parents=True)
+            (case/'inputs/01_直播回放.wav').write_bytes(b'synthetic media')
+            (case/'inputs/02_带时间码原稿.md').write_bytes((f'\ufeff发言人1 00:00\r\n独立样例{i}\r\n').encode('utf-8'))
+            cases.append(case)
+        manifest=register_campaign(cases,self.root/'campaign-result','技术测试')
+        for case,item in zip(cases,manifest['samples']):
+            self.assertEqual(item['source_sha256'],file_sha256(case/'inputs/02_带时间码原稿.md'))
+        text=(cases[0]/'inputs/02_带时间码原稿.md').read_text(encoding='utf-8-sig')
+        (cases[1]/'inputs/02_带时间码原稿.md').write_bytes(text.encode('utf-8'))
+        with self.assertRaises(ValueError):register_campaign(cases,self.root/'duplicates','重复测试')
     def test_duplicate_route_evidence_is_not_five_checks(self):
         with self.assertRaises(ValueError):build_route(self.case,acoustic_speakers='1',evidence=['same']*5)
     def test_templates_bind_extension_and_preserve_edits(self):

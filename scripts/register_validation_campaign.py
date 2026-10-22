@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from freeze_input_bundle import freeze_input_bundle
+from route_livestream import file_sha256
 
 SOURCE = "inputs/02_带时间码原稿.md"
 MANIFEST = "validation_campaign_manifest.json"
@@ -38,12 +39,13 @@ def register_campaign(
         source_path = case_dir / SOURCE
         if not source_path.is_file():
             raise FileNotFoundError(f"缺少带时间码原稿：{source_path}")
-        source_hash = sha256_text(source_path.read_text(encoding="utf-8-sig"))
-        if case_dir.name in seen_cases or source_hash in seen_hashes:
+        source_hash = file_sha256(source_path)
+        content_hash = sha256_text(source_path.read_text(encoding="utf-8-sig"))
+        if case_dir.name in seen_cases or content_hash in seen_hashes:
             raise ValueError(f"预注册场次或原稿重复：{case_dir.name}")
         input_bundle = freeze_input_bundle(case_dir)
         seen_cases.add(case_dir.name)
-        seen_hashes.add(source_hash)
+        seen_hashes.add(content_hash)
         samples.append(
             {
                 "case": case_dir.name,

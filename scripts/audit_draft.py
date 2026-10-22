@@ -3407,8 +3407,10 @@ def audit_dual_track_package_evidence(
             )
         ]
 
-    source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    draft_hash = hashlib.sha256(draft.encode("utf-8")).hexdigest()
+    source_path = case_dir / "inputs" / SOURCE_NAME
+    draft_path = case_dir / "outputs" / DRAFT_NAME
+    source_hash = file_sha256(source_path) if source_path.is_file() else ""
+    draft_hash = file_sha256(draft_path) if draft_path.is_file() else ""
     package_dirs = sorted((case_dir / "_work").glob("*双轨匿名评审包*"))
     problems: list[str] = []
     for package_dir in package_dirs:

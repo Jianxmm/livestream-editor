@@ -10,6 +10,7 @@ import json
 from pathlib import Path
 
 from benchmark_pair import analyze_pair
+from route_livestream import file_sha256
 from freeze_input_bundle import MANIFEST as INPUT_BUNDLE_MANIFEST, verify_input_bundle
 
 
@@ -142,7 +143,7 @@ def prepare_review_package(
         input_bundle = verify_input_bundle(case_dir)
 
     source = source_path.read_text(encoding="utf-8-sig")
-    source_hash = sha256_text(source)
+    source_hash = file_sha256(source_path)
     campaign_manifest_hash: str | None = None
     campaign_name: str | None = None
     if experiment_type == "双轨对比":
@@ -165,8 +166,8 @@ def prepare_review_package(
         "first": first_draft.read_text(encoding="utf-8-sig"),
         "second": second_draft.read_text(encoding="utf-8-sig"),
     }
-    hashes = {name: sha256_text(text) for name, text in versions.items()}
-    if hashes["first"] == hashes["second"]:
+    hashes = {"first": file_sha256(first_draft), "second": file_sha256(second_draft)}
+    if sha256_text(versions["first"]) == sha256_text(versions["second"]):
         raise ValueError("两份对比稿内容完全相同，不能建立双轨评审")
 
     seed = hashlib.sha256(
