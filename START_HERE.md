@@ -4,7 +4,7 @@
 
 ## 1. 下载完整安装包
 
-点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.1.3/livestream-editor-0.1.3.zip)。下载后的文件名是 `livestream-editor-0.1.3.zip`，不需要注册 GitHub 账号。
+点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.2.0/livestream-editor-0.2.0.zip)。下载后的文件名是 `livestream-editor-0.2.0.zip`，不需要注册 GitHub 账号。
 
 Codex 用户先解压，保留整个文件夹。告诉 Codex 这个文件夹放在哪里，然后发送：
 
@@ -34,3 +34,9 @@ WorkBuddy 用户在“技能 → 添加技能 → 上传技能”中选择 ZIP �
 整理后，先打开“00_从这里开始.md”阅读正文，再处理需要确认的地方。AI 如果请你核对姓名或听几段音频，按提示确认即可；正式发送前自己再看一遍。
 
 首次需要的音频工具可由 AI 协助准备，具体操作在 [安装与操作说明](TECHNICAL.md)。你不需要先看懂这些技术说明才开始使用。
+
+## 想按自己的习惯整理
+
+告诉 AI：“帮我建立直播文稿的个人资料。我主要整理……，读者是……，希望……。请帮我完善词库、参考案例和偏好，不确定的先标出来。”
+
+AI 会把这些内容放进工作区的“我的文稿资料”，以后整理时可以继续使用，不需要另外安装 Skill。没有参考稿也不影响开始。[具体操作](PERSONALIZE.md)

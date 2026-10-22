@@ -15,6 +15,7 @@
 - `python3 scripts/livestream.py self-test` 和 Skill 格式检查通过。
 - 在全新目录从打包 ZIP 安装并运行 self-test，核对不依赖源码父目录。
 - 检查白名单 `release-files.json`；新增模板或脚本时显式加入。真实案例、媒体、模型、账号、缓存不加入仓库和 ZIP。
+- 只发布 `assets/profile/` 中的空白模板与个人资料使用说明，不把使用者填写的“我的文稿资料”或本地旧版归档加入白名单。
 - 从源码根目录运行 `python3 scripts/livestream.py package --output "<根目录之外>/livestream-editor-版本.zip"`；同名文件存在时换新路径，避免覆盖正在分发的版本。
 - 使用系统哈希工具或 Python 的 hashlib 计算 ZIP 的 SHA-256，随 Release 提供。
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 
 from route_livestream import file_sha256, find_replay
+from personal_profile import validate_snapshot
 
 
 def matching_review_rows(sheet: str, item: dict) -> list[str]:
@@ -20,7 +21,7 @@ def matching_review_rows(sheet: str, item: dict) -> list[str]:
 
 
 def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]:
-    errors = []
+    errors = validate_snapshot(case)
     mode = ''
     try:
         route = json.loads((case / '_work/场次分流.json').read_text(encoding='utf-8-sig'))

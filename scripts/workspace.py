@@ -12,6 +12,7 @@ from pathlib import Path
 
 from media_tools import duration, audio_clip
 from route_livestream import file_sha256, find_replay, SPEAKER_HEADER_RE
+from personal_profile import snapshot_profile, confirmed_rows
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,7 +26,8 @@ def outside_install(path: Path) -> None:
         raise ValueError('案例或运行环境必须放在 Skill 安装目录之外，避免升级丢失或误打包素材。')
 
 
-def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = None) -> Path:
+def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = None,
+              profile: Path | None = None) -> Path:
     case = case.expanduser().resolve()
     outside_install(case)
     if case.exists():
@@ -45,6 +47,8 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
         stage = Path(temp) / case.name
         for d in ['inputs', 'outputs', '_work']:
             (stage / d).mkdir(parents=True, exist_ok=True)
+        if profile:
+            snapshot_profile(stage, profile)
         media = stage / 'inputs' / ('01_直播回放' + replay.suffix.lower())
         shutil.copyfile(replay, media)
         target = stage / 'inputs/02_带时间码原稿.md'
@@ -55,6 +59,10 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
             shutil.copyfile(people, people_target)
         else:
             people_target.write_text('# 人物与专名表\n\n请根据回放或用户提供的资料填写真实姓名、角色及核验依据。\n\n| 规范写法 | 类别 | 必须替换的错写 | 可接受写法 | 状态 | 核验依据与说明 |\n| --- | --- | --- | --- | --- | --- |\n', encoding='utf-8')
+            if profile:
+                rows = confirmed_rows((stage / '_work/个人资料/01_专用词库.md').read_text(encoding='utf-8-sig'))
+                with people_target.open('a', encoding='utf-8') as stream:
+                    stream.write('\n'.join(rows) + ('\n' if rows else ''))
         records = []
         for src, dst in [(replay, media), (transcript, target)]:
             digest = file_sha256(src)
@@ -216,6 +224,7 @@ def main() -> int:
     p = sub.add_parser('init')
     for flag in ['case', 'replay', 'transcript']: p.add_argument('--'+flag, type=Path, required=True)
     p.add_argument('--people', type=Path)
+    p.add_argument('--profile', type=Path, help='可选的个人词库、参考案例与偏好目录')
     p = sub.add_parser('templates'); p.add_argument('case', type=Path); p.add_argument('--mode', choices=['solo','dual'], required=True)
     p = sub.add_parser('probe'); p.add_argument('case', type=Path)
     p = sub.add_parser('export'); p.add_argument('case', type=Path); p.add_argument('destination', type=Path)
@@ -223,7 +232,7 @@ def main() -> int:
     try:
         if args.command == 'doctor':
             data = doctor(args.case); print(json.dumps(data, ensure_ascii=False, indent=2)); return 0 if data['status']=='READY' else 1
-        if args.command == 'init': print(init_case(args.case,args.replay,args.transcript,args.people))
+        if args.command == 'init': print(init_case(args.case,args.replay,args.transcript,args.people,args.profile))
         if args.command == 'templates': print(json.dumps(templates(args.case.resolve(),args.mode),ensure_ascii=False))
         if args.command == 'probe': print(probe(args.case.resolve()))
         if args.command == 'export': print(export_outputs(args.case,args.destination))

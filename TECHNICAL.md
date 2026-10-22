@@ -35,6 +35,10 @@ python3 "<Skill目录>/scripts/livestream.py" setup-speakers
 
 ## 素材与输出
 
+个人资料为可选项：运行 `python3 "<Skill目录>/scripts/livestream.py" profile init "<工作区>/我的文稿资料"` 补齐模板，再由 Agent 按 [个人资料说明](references/personalization.md) 协助填写。重复执行只补缺失文件，不覆盖人工内容。`profile check "<资料目录>"` 检查结构与确认依据是否填写，不验证事实真假。
+
+新场次初始化可加 `--profile "<资料目录>"`。系统保存 `_work/个人资料/` 快照与 `个人资料使用记录.json`；未另传 `--people` 时把已确认且有依据的词条带入专名表；已传人物表则逐字保留。案例与偏好供 Agent 读取，脚本不会替用户编造事实或生成文稿。资料后来更新不影响本场快照，审计会拒绝被改过的快照。已有场次不自动改写或附加资料。
+
 三份正文/检查文件完成后运行 `python3 "<Skill目录>/scripts/livestream.py" reading-index "<场次>"`，生成 `outputs/00_从这里开始.md`。此页只提供阅读链接，不代表已经人工核对或可以发送。
 
 原稿使用 UTF-8，格式见 [样例](examples/带时间码原稿.md)。目前规范输入是独立的“发言人1   00:00”时间码行；SRT/VTT 等格式先让 Agent 转成单独副本并核对，不覆盖原始导出。
@@ -45,12 +49,12 @@ Obsidian 不必安装。导出到其他目录使用 `export`，遇到已有不�
 
 ## 验证范围与更新
 
-这是 0.1.3 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
+这是 0.2.0 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
 
 更新时下载新版并解压，在新版目录运行 `python3 install.py --upgrade`（Windows 用 `py -3 install.py --upgrade`）。旧安装目录，包括人工修改和额外文件，会完整移到 `~/.agents/skill-backups/`，再安装新版；激活失败会恢复旧版。可用 `--backup-dir` 指定技能扫描目录之外的备份位置。普通安装遇到不同版本仍会停止，完全相同的版本可以重复运行。
 
 案例和模型应放在安装目录之外，更新时无需搬动。不要把旧版备份放回技能扫描目录或同时启用来处理同一场素材。
 
-维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.1.3.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
+维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.2.0.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
 代码与原创规则采用 [MIT](LICENSE)。外部模型和工具分别遵守其原许可，见 [THIRD_PARTY.md](THIRD_PARTY.md)。

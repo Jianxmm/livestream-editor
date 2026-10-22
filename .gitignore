@@ -8,3 +8,5 @@ cases/
 dist/
 *.zip
 models/
+我的文稿资料/
+.local/

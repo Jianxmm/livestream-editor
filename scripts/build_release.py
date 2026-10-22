@@ -18,7 +18,7 @@ def release_files(root: Path = ROOT) -> list[Path]:
         relative=PurePosixPath(name)
         if relative.name.startswith('.env') or relative.name in {'id_rsa','id_ed25519','credentials.json','hosts.yml'} or relative.suffix.lower() in {'.pem','.key','.p12','.pfx'}:
             raise ValueError('账号或密钥文件不能分发：'+name)
-        if relative.is_absolute() or '..' in relative.parts or '\\' in name or any(p in {'.git','cases','validation_campaigns','__pycache__','.venv'} for p in relative.parts):
+        if relative.is_absolute() or '..' in relative.parts or '\\' in name or any(p in {'.git','cases','validation_campaigns','__pycache__','.venv','我的文稿资料','.local'} for p in relative.parts):
             raise ValueError('不允许的分发路径：'+name)
         path=root/relative
         if not path.is_file() or path.is_symlink() or any((root / Path(*relative.parts[:i])).is_symlink() for i in range(1,len(relative.parts))):
