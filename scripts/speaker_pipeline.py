@@ -12,7 +12,7 @@ import tempfile
 import wave
 
 from media_tools import audio_clip, duration
-from route_livestream import find_replay, file_sha256, SPEAKER_HEADER_RE
+from route_livestream import find_replay, file_sha256, SPEAKER_HEADER_RE, valid_default_map
 from setup_speakers import default_runtime, runtime_python
 from workspace import ROOT, write_json
 
@@ -49,8 +49,8 @@ def validate_calibration(data: dict, length: float) -> None:
     for i,(a,b,sid) in enumerate(ranges):
         if any(a<d and c<b for c,d,_ in ranges[i+1:]):
             raise ValueError('身份锚点互相重叠或重复，不能重复计算时长')
-    if set(data.get('source_label_default_map',{}).values())!=ids:
-        raise ValueError('默认标签映射未覆盖两位身份；映射只是对照假设，不决定声学结果')
+    if not valid_default_map(data.get('source_label_default_map'), ids):
+        raise ValueError('普通标签映射须覆盖两位身份；发言人未标注必须设为 null，不能猜测身份。映射只是对照假设。')
 
 
 def align_blocks(source: str, segments: list[dict], mapping: dict, length: float) -> tuple[list, list]:

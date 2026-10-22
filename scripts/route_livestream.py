@@ -20,6 +20,17 @@ SPEAKER_HEADER_RE = re.compile(
 VALID_COUNTS = {"1", "2", "3+", "uncertain"}
 
 
+def valid_default_map(mapping: object, speaker_ids: set[str], labels: set[str] | None = None) -> bool:
+    if not isinstance(mapping, dict) or not mapping or (labels is not None and set(mapping) != labels):
+        return False
+    if '发言人未标注' not in mapping:
+        return set(str(value) for value in mapping.values()) == speaker_ids
+    # Unknown subtitle labels must never acquire a guessed default identity.
+    return mapping['发言人未标注'] is None and all(
+        value is None if label == '发言人未标注' else isinstance(value, str) and value in speaker_ids
+        for label, value in mapping.items())
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -69,6 +80,8 @@ def build_route(
         raise ValueError("阻断分流也必须记录至少一条回放证据。")
 
     warnings: list[str] = []
+    if '发言人未标注' in labels:
+        warnings.append('字幕未提供说话人标签；未标注不代表同一人，按真实回放重建归属。')
     if acoustic_speakers == "1" and len(labels) > 1:
         warnings.append("原稿标签多于一个，但回放确认只有一个内容说话人；标签不得覆盖声学结论。")
     if acoustic_speakers == "2" and len(labels) < 2:

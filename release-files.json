@@ -11,6 +11,7 @@
   "START_HERE.md",
   "TECHNICAL.md",
   "THIRD_PARTY.md",
+  "TRYOUT.md",
   "VALIDATION.md",
   "VERSION",
   "agents/openai.yaml",
@@ -69,6 +70,7 @@
   "scripts/self_test.py",
   "scripts/setup_speakers.py",
   "scripts/speaker_pipeline.py",
+  "scripts/subtitle_import.py",
   "scripts/summarize_dual_track_review.py",
   "scripts/summarize_validation_campaign.py",
   "scripts/track_human_review.py",
@@ -85,6 +87,7 @@
   "tests/test_portable_package.py",
   "tests/test_release_guards.py",
   "tests/test_route_livestream.py",
+  "tests/test_subtitle_import.py",
   "tests/test_validation_campaign.py",
   "tests/test_workspace_inputs.py"
 ]

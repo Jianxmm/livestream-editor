@@ -27,6 +27,11 @@ def smoke() -> dict:
             one=b''.join(struct.pack('<h',int(2000*math.sin(2*math.pi*440*i/16000))) for i in range(16000))
             for _ in range(30):w.writeframes(one)
         source=root/'原稿.md';source.write_text('发言人1   00:00\n这是技术样例，不代表真实讲话。\n\n发言人1   00:10\n核验输入复制和索引定位。\n',encoding='utf-8')
+        subtitle=root/'原字幕.srt'
+        subtitle.write_bytes('1\r\n00:00:00,120 --> 00:00:09,800\r\n字幕技术样例，不是真实讲话。\r\n\r\n2\r\n00:00:10,900 --> 00:00:29,000\r\n保留原字幕和准确时间。\r\n'.encode('utf-8-sig'))
+        subtitle_case=init_case(root/'字幕导入样例',media,subtitle)
+        assert doctor(subtitle_case)['status']=='READY'
+        assert file_sha256(subtitle)==file_sha256(subtitle_case/'inputs/05_平台原始导出.srt')
         case=init_case(root/'2026-01-01-技术样例',media,source)
         before=file_sha256(case/'inputs/02_带时间码原稿.md')
         result=extract_full_audio(case)
@@ -53,7 +58,7 @@ def smoke() -> dict:
         except FileExistsError:pass
         else:raise AssertionError('导出覆盖保护未生效')
         assert edited.read_text(encoding='utf-8')=='模拟人工修改'
-    return {'status':'PASS','checks':['中文空格路径','输入不变','整场音频时长及哈希','音频幂等复用','短音频真实转换','回听包重复生成及输入变更保护','原文索引','人工修改保护'],
+    return {'status':'PASS','checks':['中文空格路径','输入不变','SRT导入及真实回放时长匹配','整场音频时长及哈希','音频幂等复用','短音频真实转换','回听包重复生成及输入变更保护','原文索引','人工修改保护'],
             'scope':'技术链路自检；合成音调不证明说话人分离准确率、文稿质量或真人终审完成。'}
 
 def main() -> int:

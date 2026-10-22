@@ -13,7 +13,7 @@ import re
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from route_livestream import find_replay
+from route_livestream import find_replay, valid_default_map
 from typing import Iterable
 
 
@@ -1617,16 +1617,12 @@ def audit_speaker_preflight(
                 )
 
     default_map = calibration.get("source_label_default_map")
-    if (
-        not isinstance(default_map, dict)
-        or set(default_map) != source_labels
-        or set(str(value) for value in default_map.values()) != speaker_ids
-    ):
+    if not valid_default_map(default_map, speaker_ids, source_labels):
         findings.append(
             Finding(
                 "ERROR",
                 "SPEAKER_CALIBRATION_DEFAULT_MAP",
-                "默认标签映射必须覆盖原稿中的两种标签，并一一对应两位已校准说话人。",
+                "默认映射须覆盖原稿标签及已校准身份；未标注字幕必须为 null，并逐块回听核对。",
                 str(calibration_path),
             )
         )

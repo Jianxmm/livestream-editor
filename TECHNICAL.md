@@ -41,7 +41,9 @@ python3 "<Skill目录>/scripts/livestream.py" setup-speakers
 
 三份正文/检查文件完成后运行 `python3 "<Skill目录>/scripts/livestream.py" reading-index "<场次>"`，生成 `outputs/00_从这里开始.md`。此页只提供阅读链接，不代表已经人工核对或可以发送。
 
-原稿使用 UTF-8，格式见 [样例](examples/带时间码原稿.md)。目前规范输入是独立的“发言人1   00:00”时间码行；SRT/VTT 等格式先让 Agent 转成单独副本并核对，不覆盖原始导出。
+原稿使用 UTF-8，格式见 [样例](examples/带时间码原稿.md)。规范输入是独立的“发言人1   00:00”时间码行；`init --transcript "字幕.srt"` 或 `"字幕.vtt"` 也可直接导入常见完整字幕。支持 UTF-8/BOM、UTF-16 BOM、普通样式和 VTT 单声音标签；原始文件逐字节保存到 `inputs/05_平台原始导出.srt` 或 `.vtt`，规范副本放在原稿位置，`_work/字幕导入记录.json` 保留每条原文、原始毫秒、声音标签与映射。规范副本起点向下取整到秒，误差小于 1 秒；不合并、去重或推断说话人。未提供声音标签的条目写为“发言人未标注”，须由回放核验。
+
+重叠/滚动字幕、同一秒多条、单块多声音、注音及 `X-TIMESTAMP-MAP` 分段字幕会明确报错；请从原工具另导出较长、互不重叠且与完整回放对齐的转写段，不让 AI 临时猜测或移动时间。随后运行 `doctor --case "<场次>"` 检查回放范围；原字幕、规范副本和转换记录发生变化均会阻断统一审计。格式依据：[SubRip 描述](https://www.loc.gov/preservation/digital/formats/fdd/fdd000569.shtml)、[W3C WebVTT](https://www.w3.org/TR/webvtt1/)。
 
 主稿、待核清单、质检报告放在场次的 `outputs/`，证据与回听材料放在 `_work/`。单人还会提供整场 M4A。单人主稿内部保留兼容文件名 `01_公众号可发布稿.md`，人工终审通过后的发送副本为 `01_学员学习分享稿.md`。
 
@@ -55,12 +57,12 @@ Obsidian 不必安装。导出到其他目录使用 `export`，遇到已有不�
 
 ## 验证范围与更新
 
-这是 0.2.1 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
+这是 0.3.0 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
 
 更新时下载新版并解压，在新版目录运行 `python3 install.py --upgrade`（Windows 用 `py -3 install.py --upgrade`）。旧安装目录，包括人工修改和额外文件，会完整移到 `~/.agents/skill-backups/`，再安装新版；激活失败会恢复旧版。可用 `--backup-dir` 指定技能扫描目录之外的备份位置。普通安装遇到不同版本仍会停止，完全相同的版本可以重复运行。
 
 案例和模型应放在安装目录之外，更新时无需搬动。不要把旧版备份放回技能扫描目录或同时启用来处理同一场素材。
 
-维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.2.1.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
+维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.3.0.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
 代码与原创规则采用 [MIT](LICENSE)。外部模型和工具分别遵守其原许可，见 [THIRD_PARTY.md](THIRD_PARTY.md)。

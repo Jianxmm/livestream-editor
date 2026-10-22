@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
@@ -13,6 +14,7 @@ from pathlib import Path
 from media_tools import duration, audio_clip
 from route_livestream import file_sha256, find_replay, SPEAKER_HEADER_RE
 from personal_profile import snapshot_profile, confirmed_rows, validate_snapshot
+from subtitle_import import convert_subtitles
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -50,9 +52,15 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
     for p in [replay, transcript] + ([people] if people else []):
         if not p.is_file() or not p.stat().st_size:
             raise ValueError(f'输入不存在或为空：{p}')
-    text = transcript.read_text(encoding='utf-8-sig')
+    imported = None
+    if transcript.suffix.lower() in {'.srt', '.vtt'}:
+        raw_subtitles = transcript.read_bytes()
+        subtitle_source_hash = hashlib.sha256(raw_subtitles).hexdigest()
+        text, imported = convert_subtitles(raw_subtitles, transcript.suffix.lower()[1:])
+    else:
+        text = transcript.read_text(encoding='utf-8-sig')
     if not SPEAKER_HEADER_RE.search(text):
-        raise ValueError('原稿需要“发言人1   00:00”格式的独立时间码行。保留原文件，先按 examples 中格式另存规范副本。')
+        raise ValueError('可直接提供 SRT/VTT 字幕，或使用“发言人1   00:00”格式的转写稿。保留原文件，不从摘要扩写。')
     # The audited parser contract is deliberately explicit; avoid silently dropping other headers.
     if any(not m.group('label').startswith('发言人') for m in SPEAKER_HEADER_RE.finditer(text)):
         raise ValueError('请先将 Speaker/说话人 标签另存为 发言人1/发言人2 格式；不得覆盖原文件。')
@@ -70,7 +78,17 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
         shutil.copyfile(replay, media)
         target = stage / 'inputs/02_带时间码原稿.md'
         # UTF-8 BOM is preserved; readers accept it. Source content is never rewritten.
-        shutil.copyfile(transcript, target)
+        if imported is None:
+            shutil.copyfile(transcript, target)
+        else:
+            target.write_text(text, encoding='utf-8')
+            original = stage / ('inputs/05_平台原始导出' + transcript.suffix.lower())
+            shutil.copyfile(transcript, original)
+            if file_sha256(original) != subtitle_source_hash:
+                raise RuntimeError('字幕在转换期间发生变化，未创建场次；请核对后重新导入。')
+            imported['original'] = {'path': original.relative_to(stage).as_posix(), 'sha256': file_sha256(original)}
+            imported['normalized'] = {'path': target.relative_to(stage).as_posix(), 'sha256': file_sha256(target)}
+            write_json(stage / '_work/字幕导入记录.json', imported)
         people_target = stage / 'inputs/03_人物与专名表.md'
         if people:
             shutil.copyfile(people, people_target)
@@ -83,14 +101,52 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
                 with people_target.open('a', encoding='utf-8') as stream:
                     stream.write('\n'.join(rows) + ('\n' if rows else ''))
         records = []
-        for src, dst in [(replay, media), (transcript, target)]:
+        for src, dst in [(replay, media), (transcript, original if imported is not None else target)]:
             digest = file_sha256(src)
             if file_sha256(dst) != digest:
                 raise RuntimeError(f'输入复制校验失败：{src.name}')
             records.append({'original_name': src.name, 'path': dst.relative_to(stage).as_posix(), 'sha256': digest})
+        if imported is not None:
+            for path in [target, stage / '_work/字幕导入记录.json']:
+                records.append({'original_name': '生成的字幕副本或转换记录', 'path': path.relative_to(stage).as_posix(), 'sha256': file_sha256(path)})
         write_json(stage / '_work/输入来源.json', {'version': 1, 'files': records})
         stage.rename(case)
     return case
+
+
+def input_manifest_errors(case: Path) -> list[str]:
+    manifest = case / '_work/输入来源.json'
+    if not manifest.exists():
+        if (case / '_work/字幕导入记录.json').exists():
+            return ['字幕场次缺少输入来源记录，不能跳过原件和转换校验']
+        return []  # Existing cases keep their original provenance scheme.
+    errors = []
+    try:
+        files = json.loads(manifest.read_text(encoding='utf-8'))['files']
+        if not isinstance(files, list) or not files:
+            raise ValueError('输入来源列表为空或格式错误')
+        for item in files:
+            path = (case / item['path']).resolve()
+            if not path.is_relative_to(case.resolve()) or not path.is_file() or file_sha256(path) != item['sha256']:
+                errors.append(f"初始化输入发生变化：{item['path']}")
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        errors.append(f'输入来源记录无法核对：{exc}')
+    return errors
+
+
+def subtitle_timing_errors(case: Path, length: float | None = None) -> list[str]:
+    record = case / '_work/字幕导入记录.json'
+    if not record.exists():
+        return []
+    try:
+        imported = json.loads(record.read_text(encoding='utf-8'))
+        if length is None:
+            length = duration(find_replay(case))
+        if imported['cues'][-1]['end_ms'] / 1000 > length + 2:
+            return ['字幕结束时间超出回放时长，请核对是否为同一场或有剪辑偏移']
+    except (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
+        return [f'字幕时间与回放无法核对：{exc}']
+    return []
 
 
 def inspect_case(case: Path) -> dict:
@@ -111,13 +167,12 @@ def inspect_case(case: Path) -> dict:
         if not (case / 'inputs/03_人物与专名表.md').is_file():
             errors.append('缺少人物与专名表')
         errors.extend(validate_snapshot(case))
-        manifest = case / '_work/输入来源.json'
-        if manifest.is_file():
-            for item in json.loads(manifest.read_text(encoding='utf-8'))['files']:
-                path = (case / item['path']).resolve()
-                if not path.is_relative_to(case.resolve()) or not path.is_file() or file_sha256(path) != item['sha256']:
-                    errors.append(f"初始化输入发生变化：{item['path']}")
-    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        errors.extend(input_manifest_errors(case))
+        subtitle_manifest = case / '_work/字幕导入记录.json'
+        if subtitle_manifest.is_file():
+            errors.extend(subtitle_timing_errors(case, length))
+            warnings.append('字幕声音标签均未核验；“未标注”不是单人结论，需要对照回放')
+    except (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
         errors.append(str(exc))
     return {'errors': errors, 'warnings': warnings}
 
@@ -158,6 +213,10 @@ def templates(case: Path, mode: str) -> list[str]:
                     data=json.loads(content);replay=find_replay(case)
                     data['source_audio']=replay.relative_to(case).as_posix()
                     data['source_sha256']=file_sha256(replay)
+                    labels={m.group('label').replace(' ', '') for m in SPEAKER_HEADER_RE.finditer(
+                        (case/'inputs/02_带时间码原稿.md').read_text(encoding='utf-8-sig'))}
+                    if '发言人未标注' in labels:
+                        data['source_label_default_map']={label: None if label=='发言人未标注' else '待核标签映射' for label in sorted(labels)}
                     content=json.dumps(data,ensure_ascii=False,indent=2)+'\n'
                 f.write(content)
             created.append(target)

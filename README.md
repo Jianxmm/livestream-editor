@@ -6,7 +6,7 @@
 
 适合整理一个人的课程、经验分享，也适合两个人的访谈对话。正常使用不需要自己写代码。
 
-[下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.2.1/livestream-editor-0.2.1.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
+[下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.3.0/livestream-editor-0.3.0.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
 
 ## 先看看它能帮你做什么
 
@@ -22,7 +22,7 @@
 ## 使用前准备两份材料
 
 1. **直播视频或录音文件**：先下载到电脑里，目前不能只提供一个网页链接。
-2. **带时间的转写稿**：就是从声音转出的文字，每段旁边有 `00:15`、`10:30` 这样的播放位置。[格式示例](examples/带时间码原稿.md)
+2. **带时间的转写稿**：就是从声音转出的文字，每段旁边有 `00:15`、`10:30` 这样的播放位置。SRT、VTT 字幕文件也可以直接提供。[格式示例](examples/带时间码原稿.md)
 
 如果只有视频、还没有转写稿，需要先用转写工具把声音转成文字。人物姓名、主题和容易写错的专有名字，也可以一起告诉 AI。
 
@@ -77,4 +77,4 @@ AI 会使用随包提供的模板协助填写，不需要自己改 Skill。没�
 
 可以 [提交使用问题](https://github.com/Z-DB/livestream-editor/issues/new?template=usage-help.md)，写清“使用的 AI 软件、做到哪一步、看到什么提示、原本想得到什么”。提交反馈需要 GitHub 账号，下载安装不需要。请不要上传完整直播或私密稿件。
 
-[更完整的安装与操作说明](TECHNICAL.md) · [已经测过哪些情况](VALIDATION.md) · [更新记录](CHANGELOG.md) · [许可](LICENSE)
+[第一次试用怎样检查](TRYOUT.md) · [更完整的安装与操作说明](TECHNICAL.md) · [已经测过哪些情况](VALIDATION.md) · [更新记录](CHANGELOG.md) · [许可](LICENSE)

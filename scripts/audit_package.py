@@ -11,6 +11,7 @@ import sys
 from route_livestream import file_sha256, find_replay
 from personal_profile import validate_snapshot
 from build_source_review_index import raw_timecode
+from workspace import input_manifest_errors, subtitle_timing_errors
 
 
 def matching_review_rows(sheet: str, item: dict) -> list[str]:
@@ -78,7 +79,7 @@ def issue_handoff_errors(case: Path, manifest: dict) -> list[str]:
 
 
 def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]:
-    errors = validate_snapshot(case)
+    errors = validate_snapshot(case) + input_manifest_errors(case) + subtitle_timing_errors(case)
     mode = ''
     try:
         route = json.loads((case / '_work/场次分流.json').read_text(encoding='utf-8-sig'))
