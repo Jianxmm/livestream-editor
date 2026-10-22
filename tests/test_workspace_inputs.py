@@ -26,7 +26,7 @@ class WorkspaceInputTests(unittest.TestCase):
     def test_expanded_people_path_is_the_path_actually_copied(self):
         people = self.root / '人物.md'; people.write_bytes(b'\xef\xbb\xbf# Approved terms\r\n')
         expand = Path.expanduser
-        with patch.object(Path, 'expanduser', lambda p: people if str(p) == '~/人物.md' else expand(p)):
+        with patch.object(Path, 'expanduser', lambda p: people if p.as_posix() == '~/人物.md' else expand(p)):
             case = init_case(self.root / 'case', self.media, self.source, Path('~/人物.md'))
         self.assertEqual(people.read_bytes(), (case / 'inputs/03_人物与专名表.md').read_bytes())
 
