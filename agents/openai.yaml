@@ -1,4 +1,4 @@
 interface:
   display_name: "直播文稿整理"
-  short_description: "将单人分享或双人专访整理为保留原声的阅读稿，并生成可回听的待核质检包"
-  default_prompt: "使用 $livestream-editor 整理这场直播，先检查素材与环境，再按回放分流并完成阅读稿及待核质检包。"
+  short_description: "把直播视频和转写稿整理成好读的文字稿，听不清的地方单独列出，方便你核对"
+  default_prompt: "使用 $livestream-editor 帮我整理这场直播，尽量保留原话和例子，拿不准的地方单独列出来让我确认。"

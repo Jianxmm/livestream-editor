@@ -18,6 +18,7 @@ from freeze_input_bundle import inspect_input_bundle
 from track_human_review import freeze_baseline, summarize_human_review
 from audit_draft import audit_human_review_metrics
 from register_validation_campaign import register_campaign
+from build_reading_index import build_reading_index
 
 class PortableTests(unittest.TestCase):
     def setUp(self):
@@ -106,6 +107,32 @@ class PortableTests(unittest.TestCase):
         self.assertEqual(len(rows),1);self.assertIn('fact A',rows[0])
         rows=matching_review_rows(sheet,{'filename':'same.m4a','priority':'P1','issue_index':2})
         self.assertEqual(len(rows),1);self.assertIn('pending',rows[0])
+    def make_outputs(self):
+        for name in ['01_公众号可发布稿.md','02_待核问题清单.md','03_编辑质检报告.md']:
+            (self.case/'outputs'/name).write_text('技术测试正文，不是实际整理结果。',encoding='utf-8')
+    def test_reading_index_links_outputs_without_rewriting_them(self):
+        self.route('2');self.make_outputs()
+        before={p.name:p.read_bytes() for p in (self.case/'outputs').iterdir()}
+        index=build_reading_index(self.case)
+        self.assertIn('双人访谈整理稿',index.read_text(encoding='utf-8'))
+        self.assertEqual(index,build_reading_index(self.case))
+        for name,content in before.items():self.assertEqual((index.parent/name).read_bytes(),content)
+    def test_solo_reading_index_requires_and_links_full_audio(self):
+        self.route();self.make_outputs()
+        with self.assertRaises(FileNotFoundError):build_reading_index(self.case)
+        (self.case/'outputs/04_整场音频.m4a').write_bytes(b'synthetic audio fixture')
+        index=build_reading_index(self.case)
+        self.assertIn('[整场音频](04_整场音频.m4a)',index.read_text(encoding='utf-8'))
+    def test_reading_index_does_not_overwrite_human_edits(self):
+        self.route('2');self.make_outputs();index=build_reading_index(self.case)
+        index.write_text('使用者自己写的阅读提示',encoding='utf-8')
+        with self.assertRaises(FileExistsError):build_reading_index(self.case)
+        self.assertEqual(index.read_text(encoding='utf-8'),'使用者自己写的阅读提示')
+    def test_reading_index_rejects_stale_source(self):
+        self.route('2');self.make_outputs()
+        (self.case/'inputs/02_带时间码原稿.md').write_text('发言人1 00:00\n已换稿',encoding='utf-8')
+        with self.assertRaises(ValueError):build_reading_index(self.case)
+        self.assertFalse((self.case/'outputs/00_从这里开始.md').exists())
     def test_model_requires_current_confirmed_route(self):
         self.route('2');c={'source_sha256':file_sha256(self.media)}
         validate_input_binding(self.case,c)

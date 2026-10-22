@@ -10,6 +10,7 @@ COMMANDS = {
     'route': 'route_livestream.py', 'full-audio': 'extract_full_audio.py',
     'review-clips': 'extract_review_clips.py', 'source-index': 'build_source_review_index.py',
     'review-index': 'build_review_index.py', 'review': 'track_human_review.py',
+    'reading-index': 'build_reading_index.py',
     'audit': 'audit_package.py', 'speakers': 'speaker_pipeline.py',
     'setup-speakers': 'setup_speakers.py', 'package': 'build_release.py',
     'self-test': 'self_test.py',
