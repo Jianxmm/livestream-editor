@@ -60,6 +60,9 @@ def build_route(
     matches = list(SPEAKER_HEADER_RE.finditer(source_text))
     labels = sorted({normalize_label(match.group("label")) for match in matches})
 
+    if acoustic_speakers in {"1", "2"} and not matches:
+        raise ValueError("原稿没有可识别的发言人时间块；先保留原稿并转换格式，不能继续正文整理。")
+
     if acoustic_speakers in {"1", "2"} and len({item.strip() for item in evidence if item.strip()}) < 5:
         raise ValueError("单人/双人分流至少需要开场、25%、50%、75%和结尾五条回放证据。")
     if acoustic_speakers in {"3+", "uncertain"} and not evidence:

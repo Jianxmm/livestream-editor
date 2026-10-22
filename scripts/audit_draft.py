@@ -2457,8 +2457,11 @@ def audit_issue_list(text: str, path: Path, *, source: str | None = None) -> lis
         [timestamp for _, timestamp in SOURCE_SPEAKER_RE.findall(source)] if source else []
     )
     source_end = max((time_to_seconds(value) for value in source_timestamps), default=None)
-    required_columns = ("级别", "时间码", "问题类型", "原文/成稿", "处理建议", "状态")
-    if not all(column in text for column in required_columns):
+    required_columns = ({"级别", "内部标记"}, {"时间码", "回放位置"}, {"问题类型", "哪类问题"},
+                        {"原文/成稿", "需要核对的原话或文字"}, {"处理建议", "建议怎么处理"}, {"状态", "目前情况"})
+    headers = [[cell.strip() for cell in line.strip().strip('|').split('|')]
+               for line in text.splitlines() if line.lstrip().startswith('|')]
+    if not any(len(cells) == 6 and all(cell in allowed for cell, allowed in zip(cells, required_columns)) for cells in headers):
         findings.append(Finding("ERROR", "ISSUE_COLUMNS", "待核清单缺少固定表格列。", str(path)))
 
     table_counts = {"P0": 0, "P1": 0, "P2": 0}
@@ -2474,7 +2477,7 @@ def audit_issue_list(text: str, path: Path, *, source: str | None = None) -> lis
         table_counts[priority] += 1
         if status == "待确认":
             pending_counts[priority] += 1
-        if status not in ALLOWED_ISSUE_STATUSES:
+        if status not in ALLOWED_ISSUE_STATUSES | {"已保守表达"}:
             findings.append(
                 Finding("ERROR", "ISSUE_STATUS", f"待核清单存在无效状态“{status}”：{line[:160]}", str(path))
             )
@@ -2555,7 +2558,7 @@ def audit_issue_list(text: str, path: Path, *, source: str | None = None) -> lis
             continue
         cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
         status = cells[-1] if cells else ""
-        if priority.group(1) == "P0" and status not in {"已回听", "已当事人确认", "已删除", "已解决"}:
+        if priority.group(1) == "P0" and status not in {"已回听", "已当事人确认", "已删除", "已保守表达", "已解决"}:
             findings.append(Finding("ERROR", "UNRESOLVED_P0", f"存在未关闭 P0：{line[:160]}", str(path)))
         elif priority.group(1) == "P1" and status == "待确认":
             findings.append(Finding("WARNING", "UNRESOLVED_P1", f"存在未关闭 P1：{line[:160]}", str(path)))

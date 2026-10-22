@@ -12,7 +12,7 @@ from pathlib import Path
 
 from media_tools import duration, audio_clip
 from route_livestream import file_sha256, find_replay, SPEAKER_HEADER_RE
-from personal_profile import snapshot_profile, confirmed_rows
+from personal_profile import snapshot_profile, confirmed_rows, validate_snapshot
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,6 +26,19 @@ def outside_install(path: Path) -> None:
         raise ValueError('案例或运行环境必须放在 Skill 安装目录之外，避免升级丢失或误打包素材。')
 
 
+def source_timing(text: str) -> tuple[list[int], list[str]]:
+    seconds, errors = [], []
+    for match in SPEAKER_HEADER_RE.finditer(text):
+        parts = [int(x) for x in match.group('time').split(':')]
+        # MM:SS may contain elapsed minutes above 59; HH:MM:SS may not.
+        if parts[-1] >= 60 or (len(parts) == 3 and parts[-2] >= 60):
+            errors.append(f"时间码超出合法范围：{match.group('time')}")
+        seconds.append(sum(v * (60 ** i) for i, v in enumerate(reversed(parts))))
+    if any(b <= a for a, b in zip(seconds, seconds[1:])):
+        errors.append('原稿时间码不严格递增，请保留原稿并核查转换结果')
+    return seconds, errors
+
+
 def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = None,
               profile: Path | None = None) -> Path:
     case = case.expanduser().resolve()
@@ -33,7 +46,8 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
     if case.exists():
         raise FileExistsError(f'场次已经存在，保留原文件：{case}。继续旧场次请运行 doctor --case。')
     replay, transcript = replay.expanduser().resolve(), transcript.expanduser().resolve()
-    for p in [replay, transcript] + ([people.expanduser().resolve()] if people else []):
+    people = people.expanduser().resolve() if people else None
+    for p in [replay, transcript] + ([people] if people else []):
         if not p.is_file() or not p.stat().st_size:
             raise ValueError(f'输入不存在或为空：{p}')
     text = transcript.read_text(encoding='utf-8-sig')
@@ -42,6 +56,9 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
     # The audited parser contract is deliberately explicit; avoid silently dropping other headers.
     if any(not m.group('label').startswith('发言人') for m in SPEAKER_HEADER_RE.finditer(text)):
         raise ValueError('请先将 Speaker/说话人 标签另存为 发言人1/发言人2 格式；不得覆盖原文件。')
+    _, timing_errors = source_timing(text)
+    if timing_errors:
+        raise ValueError('；'.join(timing_errors))
     case.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.livestream-init-', dir=case.parent) as temp:
         stage = Path(temp) / case.name
@@ -57,6 +74,8 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
         people_target = stage / 'inputs/03_人物与专名表.md'
         if people:
             shutil.copyfile(people, people_target)
+            if file_sha256(people) != file_sha256(people_target):
+                raise RuntimeError('人物与专名表复制校验失败，原文件保留。')
         else:
             people_target.write_text('# 人物与专名表\n\n请根据回放或用户提供的资料填写真实姓名、角色及核验依据。\n\n| 规范写法 | 类别 | 必须替换的错写 | 可接受写法 | 状态 | 核验依据与说明 |\n| --- | --- | --- | --- | --- | --- |\n', encoding='utf-8')
             if profile:
@@ -83,20 +102,15 @@ def inspect_case(case: Path) -> dict:
         matches = list(SPEAKER_HEADER_RE.finditer(text))
         if not matches:
             errors.append('原稿没有可识别的发言人时间码')
-        seconds = []
-        for m in matches:
-            parts = [int(x) for x in m.group('time').split(':')]
-            if parts[-1] >= 60 or parts[-2] >= 60:
-                errors.append(f"时间码超出合法范围：{m.group('time')}")
-            seconds.append(sum(v * (60 ** i) for i, v in enumerate(reversed(parts))))
-        if any(b <= a for a, b in zip(seconds, seconds[1:])):
-            errors.append('原稿时间码不严格递增，请保留原稿并核查转换结果')
+        seconds, timing_errors = source_timing(text)
+        errors.extend(timing_errors)
         if seconds and seconds[-1] > length + 2:
             errors.append('原稿时间码超出回放时长，可能不是同一场素材')
         if len(matches) < 6:
             warnings.append('原稿很短；仅适合输入演示，完整编辑规范需要足够的实际内容')
         if not (case / 'inputs/03_人物与专名表.md').is_file():
             errors.append('缺少人物与专名表')
+        errors.extend(validate_snapshot(case))
         manifest = case / '_work/输入来源.json'
         if manifest.is_file():
             for item in json.loads(manifest.read_text(encoding='utf-8'))['files']:

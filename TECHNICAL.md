@@ -47,14 +47,20 @@ python3 "<Skill目录>/scripts/livestream.py" setup-speakers
 
 Obsidian 不必安装。导出到其他目录使用 `export`，遇到已有不同内容即停止，避免覆盖人工稿。原始输入、AI 基线、人工终稿分别保留。
 
+## 交接记录
+
+发布或发送使用统一 `audit --release` / `audit --share`。P0/P1 记录具体的已回听、已当事人确认、已删除或已保守表达；“已解决”只兼容历史普通检查，不能作为交接依据。保守表达在处理建议中引用正文实际采用的最终原句。已回听项对应当前问题、音频与终审表核验内容；填写实际结论、真实姓名和有效日期。关闭问题时保留原问题行，汇总中的 P0/P1 填未确认数量，避免删掉可追溯记录。
+
+旧场次不批量改状态或重写人工稿。新版指出记录缺口时保留原现场，按实际证据补充，不能替真人填写未发生的回听。
+
 ## 验证范围与更新
 
-这是 0.2.0 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
+这是 0.2.1 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
 
 更新时下载新版并解压，在新版目录运行 `python3 install.py --upgrade`（Windows 用 `py -3 install.py --upgrade`）。旧安装目录，包括人工修改和额外文件，会完整移到 `~/.agents/skill-backups/`，再安装新版；激活失败会恢复旧版。可用 `--backup-dir` 指定技能扫描目录之外的备份位置。普通安装遇到不同版本仍会停止，完全相同的版本可以重复运行。
 
 案例和模型应放在安装目录之外，更新时无需搬动。不要把旧版备份放回技能扫描目录或同时启用来处理同一场素材。
 
-维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.2.0.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
+维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.2.1.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
 代码与原创规则采用 [MIT](LICENSE)。外部模型和工具分别遵守其原许可，见 [THIRD_PARTY.md](THIRD_PARTY.md)。

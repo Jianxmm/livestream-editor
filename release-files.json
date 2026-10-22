@@ -79,9 +79,12 @@
   "tests/test_build_source_review_index.py",
   "tests/test_extract_full_audio.py",
   "tests/test_extract_review_clips.py",
+  "tests/test_handoff_guards.py",
   "tests/test_install.py",
   "tests/test_personal_profile.py",
   "tests/test_portable_package.py",
+  "tests/test_release_guards.py",
   "tests/test_route_livestream.py",
-  "tests/test_validation_campaign.py"
+  "tests/test_validation_campaign.py",
+  "tests/test_workspace_inputs.py"
 ]

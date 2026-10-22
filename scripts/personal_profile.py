@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+import re
 import shutil
 import tempfile
 
@@ -12,7 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE_FILES = ('README.md', '01_专用词库.md', '02_参考案例与偏好.md')
 RECORD = '_work/个人资料使用记录.json'
 SNAPSHOT = '_work/个人资料'
-EMPTY = {'', '—', '-', '待填写', '待补充', '暂无'}
+EMPTY = {'', '—', '-', '待填写', '待补充', '暂无', '无'}
+UNVERIFIED_EVIDENCE = {'待确认', '未确认', '待核实', '未核实', '尚未核实', '待回听',
+                       '待提供', '未知', '不详', '无依据', '没有依据', 'AI判断', 'AI推断',
+                       'AI猜测', 'AI生成', '模型判断', '模型推断', '机器转写', '机器识别',
+                       '上下文推断', '上下文推测', '根据上下文推断', '根据上下文推测'}
 
 
 def digest(path: Path) -> str:
@@ -53,7 +58,18 @@ def init_profile(directory: Path) -> dict:
 
 def confirmed_rows(text: str) -> list[str]:
     rows, aliases = [], {}
+    fence = None
     for line in text.splitlines():
+        marker = re.match(r'^\s{0,3}(`{3,}|~{3,})(.*)$', line)
+        if marker:
+            token, suffix = marker.groups()
+            if fence is None:
+                fence = (token[0], len(token))
+            elif token[0] == fence[0] and len(token) >= fence[1] and not suffix.strip():
+                fence = None
+            continue
+        if fence is not None:
+            continue  # Format examples are not verified vocabulary entries.
         if not line.lstrip().startswith('|'):
             continue
         cells = [x.strip().strip('`') for x in line.strip().strip('|').split('|')]
@@ -63,9 +79,9 @@ def confirmed_rows(text: str) -> list[str]:
             raise ValueError('专用词库需六列，状态使用“已确认”或“待确认”：' + cells[0])
         if cells[4] != '已确认':
             continue
-        if cells[5] in EMPTY:
+        evidence = re.sub(r'\s+', '', cells[5]).strip('。.!！')
+        if cells[5] in EMPTY or evidence in UNVERIFIED_EVIDENCE:
             raise ValueError('已确认专名缺少依据：' + cells[0])
-        import re
         for alias in [cells[0], *re.split(r'[、,，/]+', cells[2])]:
             alias = alias.strip()
             if alias in EMPTY:
@@ -95,7 +111,7 @@ def snapshot_profile(case: Path, directory: Path) -> dict:
     destination, record = case / SNAPSHOT, case / RECORD
     data = {'version': 1, 'source_directory': str(directory),
             'files': {name: digest(directory / name) for name in PROFILE_FILES}}
-    if destination.exists() or record.exists():
+    if destination.exists() or record.exists() or destination.is_symlink() or record.is_symlink():
         if validate_snapshot(case):
             raise ValueError('已有个人资料快照损坏，保留现场，不能自动替换。')
         if record.is_file() and json.loads(record.read_text(encoding='utf-8')) == data:
@@ -121,7 +137,7 @@ def snapshot_profile(case: Path, directory: Path) -> dict:
 
 def validate_snapshot(case: Path) -> list[str]:
     folder, record = case / SNAPSHOT, case / RECORD
-    if not folder.exists() and not record.exists():
+    if not folder.exists() and not record.exists() and not folder.is_symlink() and not record.is_symlink():
         return []  # Personalization is optional, including for historical cases.
     try:
         if folder.is_symlink() or record.is_symlink():

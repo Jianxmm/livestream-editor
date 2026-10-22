@@ -16,6 +16,8 @@ def release_files(root: Path = ROOT) -> list[Path]:
     files=[]
     for name in names:
         relative=PurePosixPath(name)
+        if relative.as_posix()=='PACKAGE-MANIFEST.json':
+            raise ValueError('PACKAGE-MANIFEST.json 由打包器自动生成，不能加入源文件白名单')
         if relative.name.startswith('.env') or relative.name in {'id_rsa','id_ed25519','credentials.json','hosts.yml'} or relative.suffix.lower() in {'.pem','.key','.p12','.pfx'}:
             raise ValueError('账号或密钥文件不能分发：'+name)
         if relative.is_absolute() or '..' in relative.parts or '\\' in name or any(p in {'.git','cases','validation_campaigns','__pycache__','.venv','我的文稿资料','.local'} for p in relative.parts):
@@ -37,15 +39,19 @@ def build(output: Path, root: Path = ROOT) -> dict:
     output=output.resolve()
     if output.exists():raise FileExistsError('发布包已存在，拒绝覆盖：'+str(output))
     files=release_files(root)
-    metadata={'name':'livestream-editor','version':(root/'VERSION').read_text().strip(),
-              'files':{p.relative_to(root).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in files}}
+    # Hash and write the same bytes; a concurrent source edit must not yield a
+    # ZIP whose own integrity manifest is already invalid.
+    payloads={p.relative_to(root).as_posix():p.read_bytes() for p in files}
+    version_bytes=payloads['VERSION'] if 'VERSION' in payloads else (root/'VERSION').read_bytes()
+    metadata={'name':'livestream-editor','version':version_bytes.decode('utf-8-sig').strip(),
+              'files':{name:hashlib.sha256(data).hexdigest() for name,data in payloads.items()}}
     output.parent.mkdir(parents=True,exist_ok=True)
     try:
         with zipfile.ZipFile(output,'x',compression=zipfile.ZIP_DEFLATED) as archive:
-            for p in files:
-                info=zipfile.ZipInfo('livestream-editor/'+p.relative_to(root).as_posix(),date_time=(2026,1,1,0,0,0))
+            for name,data in payloads.items():
+                info=zipfile.ZipInfo('livestream-editor/'+name,date_time=(2026,1,1,0,0,0))
                 info.compress_type=zipfile.ZIP_DEFLATED;info.external_attr=0o100644<<16
-                archive.writestr(info,p.read_bytes())
+                archive.writestr(info,data)
             info=zipfile.ZipInfo('livestream-editor/PACKAGE-MANIFEST.json',date_time=(2026,1,1,0,0,0))
             info.compress_type=zipfile.ZIP_DEFLATED;info.external_attr=0o100644<<16
             archive.writestr(info,json.dumps(metadata,ensure_ascii=False,indent=2)+'\n')

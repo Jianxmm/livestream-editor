@@ -26,22 +26,38 @@ def install(target: Path, *, upgrade: bool = False,
     files = release_files(source)
     if target == source or source.is_relative_to(target) or target.is_relative_to(source):
         raise ValueError('安装目标不能与下载目录互相包含')
+    expected_hashes = {f.relative_to(source).as_posix(): hashlib.sha256(f.read_bytes()).hexdigest()
+                       for f in files}
     manifest = source / 'PACKAGE-MANIFEST.json'
+    manifest_bytes = None
+    if manifest.is_symlink() or (manifest.exists() and not manifest.is_file()):
+        raise ValueError('下载包清单必须是普通文件，不能是目录或符号链接。')
     if manifest.is_file():
-        meta = json.loads(manifest.read_text(encoding='utf-8'))
+        manifest_bytes = manifest.read_bytes()
+        meta = json.loads(manifest_bytes.decode('utf-8'))
         expected = {f.relative_to(source).as_posix() for f in files}
         if set(meta.get('files', {})) != expected:
             raise ValueError('下载包清单与白名单不一致，拒绝安装')
         for f in files:
             name = f.relative_to(source).as_posix()
-            if meta['files'][name] != hashlib.sha256(f.read_bytes()).hexdigest():
+            if meta['files'][name] != expected_hashes[name]:
                 raise ValueError('下载包校验失败：' + name)
     backup = None
     if target.exists():
         if not target.is_dir():
             raise FileExistsError('安装目标已存在且不是目录')
-        if all((target / f.relative_to(source)).is_file()
-               and (target / f.relative_to(source)).read_bytes() == f.read_bytes() for f in files):
+        def unchanged(f: Path) -> bool:
+            relative = f.relative_to(source)
+            path = target / relative
+            if any((target / Path(*relative.parts[:i])).is_symlink()
+                   for i in range(1, len(relative.parts) + 1)):
+                return False
+            return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == expected_hashes[relative.as_posix()]
+        installed_manifest = target / manifest.name
+        manifest_unchanged = (manifest_bytes is None or
+                              (not installed_manifest.is_symlink() and installed_manifest.is_file()
+                               and installed_manifest.read_bytes() == manifest_bytes))
+        if all(unchanged(f) for f in files) and manifest_unchanged:
             return {'target': str(target), 'changed': False, 'backup': None}
         if not upgrade:
             raise FileExistsError('已有不同版本或人工修改。升级请加 --upgrade，旧版会完整备份；素材始终放在独立工作目录。')
@@ -63,8 +79,10 @@ def install(target: Path, *, upgrade: bool = False,
             dest = stage / f.relative_to(source)
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(f, dest)
-        if manifest.is_file():
-            shutil.copyfile(manifest, stage / manifest.name)
+            if hashlib.sha256(dest.read_bytes()).hexdigest() != expected_hashes[f.relative_to(source).as_posix()]:
+                raise ValueError('安装文件复制校验失败，保留原安装：' + f.relative_to(source).as_posix())
+        if manifest_bytes is not None:
+            (stage / manifest.name).write_bytes(manifest_bytes)
         if backup:
             # shutil.move also supports a backup directory on another volume.
             shutil.move(str(target), str(backup))

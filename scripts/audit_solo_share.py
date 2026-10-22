@@ -39,7 +39,7 @@ SOURCE_HEADER_RE = re.compile(
 )
 ISSUE_ROW_RE = re.compile(r"^\|\s*(P[012])\s*\|", re.MULTILINE)
 TITLE_NUMBER_RE = re.compile(r"[0-9一二三四五六七八九十百千万两]")
-ALLOWED_STATUSES = {"待确认", "已回听", "已当事人确认", "已删除", "已解决"}
+ALLOWED_STATUSES = {"待确认", "已回听", "已当事人确认", "已删除", "已保守表达", "已解决"}
 
 
 def file_sha256(path: Path) -> str:

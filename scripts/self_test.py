@@ -1,5 +1,6 @@
 """Offline technical smoke test, using generated tones (not editorial evidence)."""
 from __future__ import annotations
+import argparse
 import json
 import math
 from pathlib import Path
@@ -56,6 +57,7 @@ def smoke() -> dict:
             'scope':'技术链路自检；合成音调不证明说话人分离准确率、文稿质量或真人终审完成。'}
 
 def main() -> int:
+    argparse.ArgumentParser(description='运行离线技术自检及回归测试，不读取真实案例。').parse_args()
     try:
         result=smoke()
         tests=subprocess.run([sys.executable,'-B','-m','unittest','discover','-s',str(ROOT/'tests'),'-p','test_*.py'])

@@ -1,6 +1,7 @@
 """Shared provenance gate, followed by the independent solo/dual editorial audit."""
 from __future__ import annotations
 import argparse
+from datetime import date
 import json
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ import sys
 
 from route_livestream import file_sha256, find_replay
 from personal_profile import validate_snapshot
+from build_source_review_index import raw_timecode
 
 
 def matching_review_rows(sheet: str, item: dict) -> list[str]:
@@ -18,6 +20,61 @@ def matching_review_rows(sheet: str, item: dict) -> list[str]:
     return [line for line in sheet.splitlines() if line.startswith('|')
             and f"`{item['filename']}`" in line
             and line.strip('|').split('|')[0].strip()==key]
+
+
+def signed_by_person(value: str) -> bool:
+    match = re.search(r'\d{4}-\d{2}-\d{2}', value)
+    if not match:
+        return False
+    try:
+        date.fromisoformat(match.group())
+    except ValueError:
+        return False
+    name = (value[:match.start()] + value[match.end():]).strip(' /／|｜,，;；()（）[]【】')
+    return bool(name) and name not in {'无', '未知', '不详'} and not re.search(r'待填|待定|待确认|未完成|未签', name)
+
+
+def current_issues(text: str) -> list[dict]:
+    rows = []
+    for line in text.splitlines():
+        if not re.match(r'^\|\s*P[012]\s*\|', line):
+            continue
+        cells = [x.strip() for x in line.strip().strip('|').split('|')]
+        if len(cells) != 6:
+            raise ValueError('待核问题需保留六列表格')
+        rows.append(dict(zip(('priority', 'timecode', 'issue_type', 'issue_text', 'action', 'status'), cells)))
+    return rows
+
+
+def issue_identity(item: dict) -> tuple:
+    return (item.get('priority'), raw_timecode(str(item.get('timecode', ''))),
+            item.get('issue_type'), item.get('issue_text'))
+
+
+def issue_handoff_errors(case: Path, manifest: dict) -> list[str]:
+    rows = current_issues((case/'outputs/02_待核问题清单.md').read_text(encoding='utf-8-sig'))
+    identities = {issue_identity(row) for row in rows}
+    clips = manifest.get('clips', [])
+    errors = []
+    for clip in clips:
+        if issue_identity(clip) not in identities:
+            errors.append('回听记录未对应当前待核问题，不能沿用旧问题的结论')
+    draft = (case/'outputs/01_公众号可发布稿.md').read_text(encoding='utf-8-sig')
+    for row in rows:
+        if row['priority'] not in {'P0', 'P1'}:
+            continue
+        status = row['status']
+        if status not in {'已回听', '已当事人确认', '已删除', '已保守表达'}:
+            errors.append(f"{row['timecode']} 需要明确关闭方式，不能只写待确认或已解决")
+        elif status == '已回听' and not any(issue_identity(c) == issue_identity(row) for c in clips):
+            errors.append(f"{row['timecode']} 缺少这条问题对应的回听音频")
+        elif status == '已保守表达':
+            alternatives = re.findall(r'[“「『"]([^”」』"\n]+)[”」』"]', row['action'])
+            if not alternatives or not any(value.strip() and value.strip() in draft for value in alternatives):
+                errors.append(f"{row['timecode']} 请在处理建议中引用已采用的最终保守原句，并核对当前正文")
+        if not row['action'] or re.fullmatch(r'待填|待定|待确认|已解决|已处理|已经处理好了|处理完成|无|—', row['action']):
+            errors.append(f"{row['timecode']} 请记录实际核对依据或最终处理")
+    return errors
 
 
 def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]:
@@ -53,6 +110,7 @@ def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]
                 errors.append('回听音频未绑定当前原稿')
             if manifest.get('source_sha256') != file_sha256(replay):
                 errors.append('回听音频未绑定当前回放')
+            errors.extend(issue_handoff_errors(case, manifest))
             samples = manifest.get('samples', [])
             if len({x['filename'] for x in samples}) < 5:
                 errors.append('真人终审需要至少五段不同的随机抽听片段')
@@ -69,15 +127,21 @@ def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]
                     errors.append(f'终审表未唯一对应音频：{name}'); continue
                 cells = [x.strip() for x in rows[0].strip('|').split('|')]
                 tail = cells[-3:]
-                if any(not x or re.search(r'待填|待定|未完成|待确认',x) for x in tail) or not re.search(r'\d{4}-\d{2}-\d{2}', tail[-1]):
-                    errors.append(f'回听结论或真人签字未完成：{name}')
+                if len(tail) != 3 or any(not x or re.search(r'待填|待定|未完成|待确认|未回听|尚未回听|未核对',x) for x in tail[:2]):
+                    errors.append(f'回听结论未完成：{name}')
+                if not tail or not signed_by_person(tail[-1]):
+                    errors.append(f'真人签字或有效日期未完成：{name}')
+                if item.get('priority') != 'SAMPLE':
+                    question = str(item.get('issue_type', '')) + '：' + str(item.get('issue_text', '')).replace('|', '／')
+                    if len(cells) != 7 or raw_timecode(cells[1]) != raw_timecode(str(item.get('timecode', ''))) or cells[2] != question:
+                        errors.append(f'终审表核验内容与当前问题不匹配：{name}')
             if mode == 'solo':
                 report=(case/'outputs/03_编辑质检报告.md').read_text(encoding='utf-8-sig')
                 if not re.search(r'^- 是否可发送给学员：\s*(?:是|可发送)\s*$',report,re.M):
                     errors.append('质检报告尚未由真人确认可发送给学员')
                 from audit_draft import audit_human_review_metrics
                 errors.extend(f.message for f in audit_human_review_metrics(case,report) if f.level=='ERROR')
-    except (OSError, ValueError, KeyError, TypeError) as exc:
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
         errors.append(f'证据材料缺失或无效：{exc}')
     return mode, errors
 

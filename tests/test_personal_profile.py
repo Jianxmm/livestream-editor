@@ -70,6 +70,39 @@ class PersonalProfileTests(unittest.TestCase):
                            '| 乙 | 品牌 | 别字 | — | 已确认 | 用户确认 |')
         self.assertEqual(confirmed_rows('| 甲 | 人名 | 乙 | — | 待确认 | 猜测 |'), [])
 
+    def test_format_examples_inside_fences_are_not_imported_as_real_terms(self):
+        real = '| 本场品牌 | 品牌 | 本场品排 | — | 已确认 | 使用者明确确认 |'
+        example = '| 示例人物 | 人名 | 示例人勿 | — | 已确认 | 示例来源，仅展示格式 |'
+        for fence in ['```', '~~~~']:
+            with self.subTest(fence=fence):
+                text = f'{fence}markdown\n{example}\n{fence}\n{real}\n'
+                self.assertEqual(confirmed_rows(text), [real])
+
+    def test_unverified_evidence_does_not_turn_a_term_into_confirmed_input(self):
+        for index, evidence in enumerate(['待确认', '未核实', 'AI 判断。', '上下文推测', '无']):
+            with self.subTest(evidence=evidence):
+                (self.profile / '01_专用词库.md').write_text(
+                    f'| 某名称 | 品牌 | 某名陈 | — | 已确认 | {evidence} |', encoding='utf-8')
+                case = self.root / f'没有依据-{index}'
+                with self.assertRaises(ValueError):
+                    init_case(case, self.media, self.transcript, profile=self.profile)
+                self.assertFalse(case.exists())
+
+    def test_broken_snapshot_links_are_not_treated_as_missing_optional_profile(self):
+        for name in ['个人资料', '个人资料使用记录.json']:
+            with self.subTest(name=name):
+                case = self.root / name
+                (case / '_work').mkdir(parents=True)
+                target = case / '_work' / name
+                try:
+                    target.symlink_to(self.root / '不存在的资料', target_is_directory=name == '个人资料')
+                except OSError:
+                    self.skipTest('platform does not allow unprivileged symlinks')
+                self.assertTrue(validate_snapshot(case))
+                with self.assertRaises(ValueError):
+                    snapshot_profile(case, self.profile)
+                self.assertTrue(target.is_symlink())
+
     def test_new_case_imports_only_confirmed_terms_and_preserves_sources(self):
         self.terms()
         case = init_case(self.root / '案例', self.media, self.transcript, profile=self.profile)

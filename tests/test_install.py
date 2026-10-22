@@ -45,6 +45,37 @@ class InstallTests(unittest.TestCase):
         with patch('install.shutil.copyfile', side_effect=OSError('test disk failure')):
             with self.assertRaises(OSError):self.run_install(upgrade=True)
         self.assertEqual((self.target/'SKILL.md').read_text(),'human edit')
+    def test_corrupt_staging_copy_does_not_replace_previous_installation(self):
+        self.run_install(); (self.target/'SKILL.md').write_text('human edit')
+        import shutil
+        original=shutil.copyfile
+        def corrupt(source,destination,*args,**kwargs):
+            result=original(source,destination,*args,**kwargs)
+            if Path(destination).name=='SKILL.md':Path(destination).write_text('damaged copy')
+            return result
+        with patch('install.shutil.copyfile',side_effect=corrupt):
+            with self.assertRaisesRegex(ValueError,'复制校验失败'):
+                self.run_install(upgrade=True)
+        self.assertEqual((self.target/'SKILL.md').read_text(),'human edit')
+        self.assertFalse(any(self.backups.iterdir()))
+    def test_source_change_during_copy_creates_no_target(self):
+        import shutil
+        original=shutil.copyfile
+        def changing(source,destination,*args,**kwargs):
+            if Path(source).name=='SKILL.md':Path(source).write_text('source changed after validation')
+            return original(source,destination,*args,**kwargs)
+        with patch('install.shutil.copyfile',side_effect=changing):
+            with self.assertRaisesRegex(ValueError,'复制校验失败'):
+                self.run_install()
+        self.assertFalse(self.target.exists())
+    def test_linked_managed_file_is_not_reported_as_identical_install(self):
+        self.run_install()
+        shared=self.root/'shared.md';shared.write_text('new skill')
+        (self.target/'SKILL.md').unlink()
+        try:(self.target/'SKILL.md').symlink_to(shared)
+        except OSError:self.skipTest('platform does not allow unprivileged symlinks')
+        with self.assertRaises(FileExistsError):self.run_install()
+        self.assertTrue((self.target/'SKILL.md').is_symlink())
     def test_activation_failure_restores_previous_install(self):
         self.run_install(); (self.target/'SKILL.md').write_text('human edit')
         original=Path.rename

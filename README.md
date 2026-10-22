@@ -6,7 +6,7 @@
 
 适合整理一个人的课程、经验分享，也适合两个人的访谈对话。正常使用不需要自己写代码。
 
-[下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.2.0/livestream-editor-0.2.0.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
+[下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.2.1/livestream-editor-0.2.1.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
 
 ## 先看看它能帮你做什么
 
