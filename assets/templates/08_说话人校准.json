@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "source_audio": "inputs/01_直播回放.mp4",
+  "speaker_count": 2,
+  "method": "人工身份锚点+独立说话人时间轴",
+  "status": "待确认",
+  "source_label_default_map": {
+    "发言人1": "SPK_HOST",
+    "发言人2": "SPK_GUEST"
+  },
+  "speakers": [
+    {
+      "speaker_id": "SPK_HOST",
+      "name": "主持人姓名",
+      "role": "主持人",
+      "reference_segments": [
+        {
+          "start": "00:00",
+          "end": "00:15",
+          "identity_basis": "填写回放画面、自我介绍或真人听辨依据",
+          "overlap": false,
+          "review_status": "待确认"
+        },
+        {
+          "start": "00:00",
+          "end": "00:15",
+          "identity_basis": "填写第二段独立身份依据",
+          "overlap": false,
+          "review_status": "待确认"
+        }
+      ]
+    },
+    {
+      "speaker_id": "SPK_GUEST",
+      "name": "嘉宾姓名",
+      "role": "嘉宾",
+      "reference_segments": [
+        {
+          "start": "00:00",
+          "end": "00:15",
+          "identity_basis": "填写回放画面、自我介绍或真人听辨依据",
+          "overlap": false,
+          "review_status": "待确认"
+        },
+        {
+          "start": "00:00",
+          "end": "00:15",
+          "identity_basis": "填写第二段独立身份依据",
+          "overlap": false,
+          "review_status": "待确认"
+        }
+      ]
+    }
+  ]
+}

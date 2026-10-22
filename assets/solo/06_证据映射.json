@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "source": "inputs/02_带时间码原稿.md",
+  "sections": [
+    {
+      "module_id": "M01",
+      "draft_heading": "01<br>章节标题",
+      "draft_anchor": "成稿中可唯一定位的原句",
+      "source_ranges": [
+        {
+          "start": "00:00",
+          "end": "09:59"
+        }
+      ],
+      "key_details": [],
+      "verification_status": "原稿核对",
+      "edit_decision_ids": [],
+      "notes": "按原时间顺序轻度校订。"
+    }
+  ]
+}
