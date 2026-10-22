@@ -45,12 +45,12 @@ Obsidian 不必安装。导出到其他目录使用 `export`，遇到已有不�
 
 ## 验证范围与更新
 
-这是 0.1.2 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
+这是 0.1.3 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
 
 更新时下载新版并解压，在新版目录运行 `python3 install.py --upgrade`（Windows 用 `py -3 install.py --upgrade`）。旧安装目录，包括人工修改和额外文件，会完整移到 `~/.agents/skill-backups/`，再安装新版；激活失败会恢复旧版。可用 `--backup-dir` 指定技能扫描目录之外的备份位置。普通安装遇到不同版本仍会停止，完全相同的版本可以重复运行。
 
 案例和模型应放在安装目录之外，更新时无需搬动。不要把旧版备份放回技能扫描目录或同时启用来处理同一场素材。
 
-维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.1.2.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
+维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.1.3.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
 代码与原创规则采用 [MIT](LICENSE)。外部模型和工具分别遵守其原许可，见 [THIRD_PARTY.md](THIRD_PARTY.md)。

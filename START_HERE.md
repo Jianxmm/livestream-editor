@@ -4,13 +4,17 @@
 
 ## 1. 下载完整安装包
 
-点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.1.2/livestream-editor-0.1.2.zip)。下载后的文件名是 `livestream-editor-0.1.2.zip`，不需要注册 GitHub 账号。
+点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.1.3/livestream-editor-0.1.3.zip)。下载后的文件名是 `livestream-editor-0.1.3.zip`，不需要注册 GitHub 账号。
 
 Codex 用户先解压，保留整个文件夹。告诉 Codex 这个文件夹放在哪里，然后发送：
 
 > 请帮我安装这个文件夹里的直播文稿整理工具。请阅读 README.md 和 TECHNICAL.md，检查需要的工具并完成安装。遇到缺项，请说明我需要做什么。
 
-WorkBuddy 用户在“技能 → 添加技能 → 上传技能”中选择 ZIP 文件，再让它检查需要的工具。如果导入失败，把提示告诉分享工具给你的同事。
+安装完成后新建对话，输入 `$livestream-editor` 调用；列表里没有显示时，重启客户端后再试。
+
+WorkBuddy 用户在“技能 → 添加技能 → 上传技能”中选择 ZIP 文件，再让它检查需要的工具。当前尚未完成该客户端的实际导入验收；如果导入失败，可在 [项目反馈页](https://github.com/Z-DB/livestream-editor/issues/new?template=usage-help.md) 说明提示内容。
+
+安装包里只有一个 `livestream-editor` Skill，已包含单人分享和双人访谈两种处理方式。需要保留完整文件夹，不能只复制里面的 `SKILL.md`。
 
 ## 2. 准备素材
 

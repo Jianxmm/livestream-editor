@@ -5,7 +5,7 @@
 ## 推荐的交付方式
 
 1. GitHub 仓库存放本目录内的源码、说明、模板、测试与 MIT 许可。
-2. GitHub Releases 上传 `scripts/livestream.py package` 生成的 ZIP 和 SHA-256 文件，作为同事的下载入口。版本号同步 `VERSION` 与 Release 标题。
+2. GitHub Releases 上传 `scripts/livestream.py package` 生成的 ZIP 和 SHA-256 文件，作为安装包下载入口。版本号同步 `VERSION` 与 Release 标题。
 3. 新手优先下载 Release ZIP；GitHub 自动生成的 Source code ZIP 只用于源码获取，它的外层目录名可能不同。
 4. Codex 用户解压后让 Agent 按 README 运行安装器；WorkBuddy 用户按客户端的“上传技能”导入 Release ZIP。尚未实测的客户端先运行环境检查和 self-test。
 
