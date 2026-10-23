@@ -9,6 +9,9 @@ import json
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from speaker_analysis import verified_solo_route
+from review_validation import valid_review_date
+from content_scope import read_content_scope
 
 
 REQUIRED_FILES = (
@@ -190,8 +193,8 @@ def audit_case(case_dir: Path, *, share: bool = False, release: bool = False) ->
     coverage_text = (case_dir / COVERAGE).read_text(encoding="utf-8-sig")
     blocks = source_blocks(source_text)
 
-    if markdown_field(report_text, "内容类型") != "单人开营分享":
-        result.error("SOLO_TYPE_REQUIRED", "质检报告必须明确“内容类型：单人开营分享”。")
+    if markdown_field(report_text, "内容类型") not in {"单人分享", "单人开营分享"}:
+        result.error("SOLO_TYPE_REQUIRED", "质检报告必须明确“内容类型：单人分享”（兼容旧单人开营分享）。")
     if not blocks:
         result.error("NO_TIMECODE_BLOCKS", "原稿没有识别到带说话人标签的时间块。")
         return result
@@ -199,9 +202,13 @@ def audit_case(case_dir: Path, *, share: bool = False, release: bool = False) ->
     speakers = {speaker for speaker, _, _ in blocks}
     times = [to_seconds(timecode) for _, timecode, _ in blocks]
     result.metrics["source_blocks"] = len(blocks)
-    result.metrics["source_speakers"] = len(speakers)
-    if len(speakers) != 1:
+    route_confirms_one = verified_solo_route(case_dir, route)
+    result.metrics["source_label_count"] = len(speakers)
+    result.metrics["source_speakers"] = 1 if route_confirms_one else len(speakers)
+    if len(speakers) != 1 and not route_confirms_one:
         result.error("NOT_EXACTLY_ONE_SPEAKER", f"原稿说话人={sorted(speakers)}")
+    elif len(speakers) != 1:
+        result.warning("SOURCE_LABELS_RECONCILED", "原稿含多个平台标签，本场回放已确认只有一个内容说话人；原标签继续保留追溯。")
     if any(current <= previous for previous, current in zip(times, times[1:])):
         result.error("TIMECODES_NOT_INCREASING", "原稿时间码必须严格递增。")
 
@@ -290,9 +297,16 @@ def audit_case(case_dir: Path, *, share: bool = False, release: bool = False) ->
             except (AttributeError, json.JSONDecodeError, TypeError, ValueError) as exc:
                 result.error("INVALID_AUDIO_MANIFEST", str(exc))
 
-    source_spoken = "".join(body for _, _, body in blocks)
+    scope = read_content_scope(case_dir, source_text, full_text, handoff=handoff)
+    for error in scope.errors:
+        result.error("CONTENT_SCOPE_INVALID", error)
+    for warning in scope.warnings:
+        result.warning("CONTENT_SCOPE_PENDING", warning)
+    source_spoken = "".join(body for _, _, body in source_blocks(scope.source))
+    result.metrics['source_all_spoken_chars'] = len(compact_chars(''.join(body for _,_,body in blocks)))
+    result.metrics['content_exclusions'] = len(scope.exclusions)
     draft_body = body_between_markers(draft_text)
-    full_body = body_between_markers(full_text)
+    full_body = body_between_markers(scope.full_draft)
     if draft_body is None:
         result.error("DRAFT_BODY_MARKERS", f"成稿缺少 {BODY_START}/{BODY_END}。")
     if full_body is None:
@@ -417,7 +431,7 @@ def audit_case(case_dir: Path, *, share: bool = False, release: bool = False) ->
         if not reviewer or reviewer in {"待填", "待填写", "无"}:
             result.error("SHARE_REVIEWER_REQUIRED", "学员发送模式必须填写真实终审人。")
         review_date = markdown_field(report_text, "终审日期") or ""
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", review_date):
+        if not valid_review_date(review_date):
             result.error("SHARE_DATE_REQUIRED", "学员发送模式必须填写YYYY-MM-DD终审日期。")
         readthrough = markdown_field(report_text, "学习稿独立通读")
         if readthrough is None:

@@ -65,15 +65,16 @@ def align_blocks(source: str, segments: list[dict], mapping: dict, length: float
         if not linked: status='无法映射'
         elif len(ids)>1:status='混合说话人'
         elif ambiguous:status='无法映射'
+        elif label in mapping and mapping[label] is None and all(s.get('uncertain') is False for s in linked):status='声学归属'
         elif next(iter(ids))!=mapping.get(label):status='冲突待核'
         else:status='一致'
         sid=next(iter(ids)) if len(ids)==1 else None
         cid=None
-        if status!='一致':
+        if status not in {'一致','声学归属'}:
             cid=f'C{len(conflicts)+1:04d}'
             conflicts.append({'id':cid,'time':m.group('time'),'type':status,'label':label,'speakers':','.join(sorted(ids)) or '无声学覆盖'})
         blocks.append({'source_start':m.group('time'),'source_label':label,'timeline_segment_ids':[s['id'] for s in linked],
-                       'resolved_speaker_id':sid,'status':status,'conflict_id':cid,'notes':'机器对齐；疑点需回放核验'})
+                       'resolved_speaker_id':sid,'status':status,'conflict_id':cid,'notes':'机器对齐；声学归属不等于真人回听，疑点需回放核验'})
     if not blocks:raise ValueError('原稿没有可对齐的发言时间块')
     return blocks,conflicts
 

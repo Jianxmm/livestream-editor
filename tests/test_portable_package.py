@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 from workspace import init_case, templates, inspect_case, export_outputs, probe
 from route_livestream import build_route, write_route, file_sha256
+from route_fixture import observations_for
 from build_source_review_index import build_source_review_index
 from audit_package import shared_errors, matching_review_rows
 from speaker_pipeline import validate_calibration, align_blocks, validate_input_binding
@@ -30,7 +31,7 @@ class PortableTests(unittest.TestCase):
         self.evidence=[f'{i*10:02d}:00 合成测试证据 {i}' for i in range(5)]
     def tearDown(self):self.temp.cleanup()
     def route(self,count='1'):
-        route=build_route(self.case,acoustic_speakers=count,evidence=self.evidence)
+        route=build_route(self.case,acoustic_speakers=count,evidence=self.evidence,observations=observations_for(self.case))
         write_route(self.case,route);return route
     def test_init_preserves_bytes_extension_and_bom(self):
         self.assertEqual(self.source.read_bytes(),(self.case/'inputs/02_带时间码原稿.md').read_bytes())

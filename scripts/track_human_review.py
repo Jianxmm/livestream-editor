@@ -8,10 +8,12 @@ from datetime import datetime
 from difflib import SequenceMatcher
 import hashlib
 import json
+import math
 import re
 import shutil
 from pathlib import Path
 from route_livestream import file_sha256
+from review_validation import valid_review_date
 
 
 SOURCE = "inputs/02_带时间码原稿.md"
@@ -102,9 +104,9 @@ def summarize_human_review(
 ) -> dict[str, object]:
     if not reviewer.strip() or reviewer.strip() in {"待填", "待填写"}:
         raise ValueError("必须填写真实终审人。")
-    if not review_date.strip() or review_date.strip() in {"待填", "待填写"}:
-        raise ValueError("必须填写终审日期。")
-    if minutes <= 0:
+    if not valid_review_date(review_date):
+        raise ValueError("必须填写有效的YYYY-MM-DD终审日期。")
+    if not math.isfinite(minutes) or minutes <= 0:
         raise ValueError("人工终审耗时必须大于0分钟。")
 
     case_dir = case_dir.resolve()

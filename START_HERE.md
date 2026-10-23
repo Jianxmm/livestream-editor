@@ -4,7 +4,7 @@
 
 ## 1. 下载完整安装包
 
-点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.3.0/livestream-editor-0.3.0.zip)。下载后的文件名是 `livestream-editor-0.3.0.zip`，不需要注册 GitHub 账号。
+点击 [这里下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.4.0/livestream-editor-0.4.0.zip)。下载后的文件名是 `livestream-editor-0.4.0.zip`，不需要注册 GitHub 账号。
 
 Codex 用户先解压，保留整个文件夹。告诉 Codex 这个文件夹放在哪里，然后发送：
 

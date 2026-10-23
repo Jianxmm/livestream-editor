@@ -8,10 +8,12 @@ import re
 import subprocess
 import sys
 
-from route_livestream import file_sha256, find_replay
+from route_livestream import file_sha256, find_replay, route_position_errors
 from personal_profile import validate_snapshot
 from build_source_review_index import raw_timecode
 from workspace import input_manifest_errors, subtitle_timing_errors
+from content_scope import read_content_scope
+from review_validation import valid_review_date
 
 
 def matching_review_rows(sheet: str, item: dict) -> list[str]:
@@ -27,9 +29,7 @@ def signed_by_person(value: str) -> bool:
     match = re.search(r'\d{4}-\d{2}-\d{2}', value)
     if not match:
         return False
-    try:
-        date.fromisoformat(match.group())
-    except ValueError:
+    if not valid_review_date(match.group()):
         return False
     name = (value[:match.start()] + value[match.end():]).strip(' /／|｜,，;；()（）[]【】')
     return bool(name) and name not in {'无', '未知', '不详'} and not re.search(r'待填|待定|待确认|未完成|未签', name)
@@ -80,9 +80,15 @@ def issue_handoff_errors(case: Path, manifest: dict) -> list[str]:
 
 def shared_errors(case: Path, *, handoff: bool = False) -> tuple[str, list[str]]:
     errors = validate_snapshot(case) + input_manifest_errors(case) + subtitle_timing_errors(case)
+    full_path = case/'_work/完整编辑底稿.md'
+    source_path = case/'inputs/02_带时间码原稿.md'
+    if full_path.is_file() and source_path.is_file():
+        errors.extend(read_content_scope(case, source_path.read_text(encoding='utf-8-sig'),
+                                         full_path.read_text(encoding='utf-8-sig'), handoff=handoff).errors)
     mode = ''
     try:
         route = json.loads((case / '_work/场次分流.json').read_text(encoding='utf-8-sig'))
+        errors.extend(route_position_errors(case,route,handoff=handoff))
         mode = route.get('mode', '')
         if route.get('status') != 'PASS' or mode not in {'solo','dual'}:
             errors.append('分流尚未通过或人数不受支持')

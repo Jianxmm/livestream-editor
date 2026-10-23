@@ -14,6 +14,10 @@ import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from route_livestream import find_replay, valid_default_map
+from speaker_analysis import SpeakerAnalysis
+from review_validation import valid_review_date
+from content_scope import read_content_scope
+from speaker_analysis import build_speaker_analysis
 from typing import Iterable
 
 
@@ -111,6 +115,7 @@ SOURCE_ORDER_MAX_BACKTRACK_SECONDS = 4 * 60
 ALLOWED_ISSUE_STATUSES = {"待确认", "已回听", "已当事人确认", "已删除", "已解决"}
 ALLOWED_SPEAKER_BLOCK_STATUSES = {
     "一致",
+    "声学归属",
     "真人已确认",
     "冲突待核",
     "混合说话人",
@@ -777,7 +782,7 @@ def retention_ratio(
     return len(draft_content) / len(source_content)
 
 
-def audit_retention(source: str, draft: str, path: Path, coverage: str = "") -> list[Finding]:
+def audit_retention(source: str, draft: str, path: Path, coverage: str = "", *, source_turn_count: int | None = None) -> list[Finding]:
     """Block long-form drafts that no longer function as immersive transcripts."""
     semantic_end = declared_semantic_end_seconds(coverage)
     ratio = retention_ratio(source, draft, source_end_seconds=semantic_end)
@@ -789,6 +794,8 @@ def audit_retention(source: str, draft: str, path: Path, coverage: str = "") -> 
         for match in SOURCE_SPEAKER_RE.finditer(source)
         if semantic_end is None or time_to_seconds(match.group(2)) < semantic_end
     )
+    if source_turn_count is not None:
+        source_turns = source_turn_count
     draft_turns = sum(
         1 for match in DRAFT_TURN_RE.finditer(draft) if match.group(1) not in NON_SPEAKER_LABELS
     )
@@ -1180,7 +1187,7 @@ def audit_coverage_map(text: str, source: str, path: Path) -> list[Finding]:
     return findings
 
 
-def audit_edit_ledger(text: str, source: str, issues: str, draft: str, path: Path) -> list[Finding]:
+def audit_edit_ledger(text: str, source: str, issues: str, draft: str, path: Path, *, speaker_analysis: SpeakerAnalysis | None = None) -> list[Finding]:
     """Validate evidence for every non-trivial speaker, ASR, fact, or privacy edit."""
     findings: list[Finding] = []
     try:
@@ -1194,9 +1201,11 @@ def audit_edit_ledger(text: str, source: str, issues: str, draft: str, path: Pat
             Finding("ERROR", "EDIT_LEDGER_SOURCE", f"编辑决策台账 source 必须为 inputs/{SOURCE_NAME}。", str(path))
         )
     speaker_map = data.get("speaker_map")
-    if not isinstance(speaker_map, dict) or len(speaker_map) != 2 or any(not value for value in speaker_map.values()):
+    map_valid = (speaker_analysis.valid_ledger_map(speaker_map) if speaker_analysis is not None
+                 else isinstance(speaker_map, dict) and len(speaker_map) == 2 and all(speaker_map.values()))
+    if not map_valid:
         findings.append(
-            Finding("ERROR", "EDIT_LEDGER_SPEAKERS", "编辑决策台账必须记录两位原始说话人的姓名映射。", str(path))
+            Finding("ERROR", "EDIT_LEDGER_SPEAKERS", "台账标签映射必须与本场已核身份一致；未知标签保留null，并由逐块时间轴提供归属。", str(path))
         )
     edits = data.get("nontrivial_edits")
     if not isinstance(edits, list):
@@ -1670,11 +1679,17 @@ def audit_speaker_preflight(
             findings.append(Finding("ERROR", "SPEAKER_TIMELINE_CLUSTER", f"{segment_id} 缺少原始聚类编号。", str(timeline_path)))
         if not isinstance(segment.get("overlap"), bool):
             findings.append(Finding("ERROR", "SPEAKER_TIMELINE_OVERLAP_FLAG", f"{segment_id} 缺少布尔型 overlap 标记。", str(timeline_path)))
+        try:
+            precise_duration = float(segment.get('end_seconds', end_second)) - float(segment.get('start_seconds', start_second))
+        except (ValueError, TypeError):
+            precise_duration = -1
         segment_rows[segment_id] = {
             "start": start_second,
             "end": end_second,
             "speaker_id": speaker_id,
             "overlap": segment.get("overlap"),
+            "uncertain": segment.get("uncertain"),
+            "duration": precise_duration,
         }
 
     ordered_segments = sorted(segment_rows.items(), key=lambda item: (int(item[1]["start"]), int(item[1]["end"])))
@@ -1705,6 +1720,19 @@ def audit_speaker_preflight(
     if not isinstance(source_blocks, list) or not source_blocks:
         findings.append(Finding("ERROR", "SPEAKER_TIMELINE_SOURCE_BLOCKS", "说话人时间轴没有逐块对齐原稿。", str(timeline_path)))
         source_blocks = []
+    if any(isinstance(block, dict) and block.get('status') == '声学归属' for block in source_blocks):
+        try:
+            case = timeline_path.resolve().parents[1]
+            replay = find_replay(case)
+            source_path = case / 'inputs' / SOURCE_NAME
+            bound = timeline.get('provenance', {})
+            if calibration.get('source_sha256') != file_sha256(replay) or read_text(source_path) != source:
+                raise ValueError('回放身份锚点或原稿绑定不一致')
+            for key, item in [('replay_sha256', replay), ('transcript_sha256', source_path), ('calibration_sha256', calibration_path)]:
+                if bound.get(key) != file_sha256(item):
+                    raise ValueError('当前输入绑定不一致：' + key)
+        except (OSError, ValueError, TypeError, AttributeError) as error:
+            findings.append(Finding('ERROR', 'SPEAKER_ACOUSTIC_BINDING', '声学归属必须绑定当前回放、原稿和身份锚点：'+str(error), str(timeline_path)))
     for index, block in enumerate(source_blocks, start=1):
         if not isinstance(block, dict):
             findings.append(Finding("ERROR", "SPEAKER_TIMELINE_BLOCK_ROW", f"原稿对齐第{index}条不是对象。", str(timeline_path)))
@@ -1795,6 +1823,14 @@ def audit_speaker_preflight(
                         str(timeline_path),
                     )
                 )
+        elif status == '声学归属':
+            if conflict_id or source_label != '发言人未标注' or not isinstance(default_map, dict) or default_map.get(source_label) is not None:
+                findings.append(Finding('ERROR', 'SPEAKER_ACOUSTIC_LABEL', f'{start} 声学归属只用于原标签未知且没有既存标签假设的块。', str(timeline_path)))
+            if not known_segments or {item['speaker_id'] for item in known_segments} != {resolved_id} or any(
+                item.get('uncertain') is not False or item.get('overlap') is not False
+                or not math.isfinite(item['duration']) or item['duration'] < 3 for item in known_segments
+            ):
+                findings.append(Finding('ERROR', 'SPEAKER_ACOUSTIC_UNCERTAIN', f'{start} 含混合、重叠、短片段或不确定声音，必须进入待核冲突。', str(timeline_path)))
         else:
             if not conflict_id:
                 findings.append(
@@ -1918,9 +1954,9 @@ def check_required_files(case_dir: Path) -> tuple[dict[str, Path], list[Finding]
     if not paths["replay"].is_file():
         findings.append(
             Finding(
-                "WARNING",
+                "ERROR",
                 "MISSING_REPLAY",
-                "缺少直播回放；无法回听的 ASR 疑点必须进入待核清单。",
+                "缺少本流程必需的直播回放；请先补齐素材，不能把文本预处理作为整场整理完成。",
             )
         )
     if not paths["terms"].is_file():
@@ -1976,7 +2012,7 @@ def check_required_files(case_dir: Path) -> tuple[dict[str, Path], list[Finding]
             Finding(
                 "WARNING",
                 "SPEAKER_PREFLIGHT_UNAVAILABLE",
-                "没有回放，无法建立独立说话人时间轴；只能生成归属待核的暂定阅读稿，不能发布。",
+                "没有回放，无法建立独立说话人时间轴；本流程暂停在输入检查，不生成冒充完整整理的暂定稿。",
             )
         )
     return paths, findings
@@ -2056,15 +2092,8 @@ def audit_draft(
                     str(path),
                 )
             )
-        if "我和" not in introduction:
-            findings.append(
-                Finding(
-                    "WARNING",
-                    "MISSING_HOST_FIRST_PERSON",
-                    "正文前导语没有用主持人第一人称建立“我和嘉宾做了一场直播对谈”的关系。",
-                    str(path),
-                )
-            )
+        # Neutral narration is the default when the publishing identity is unknown.
+        # First-person authorization is an editorial input, not a required phrase.
         if not any(phrase in introduction for phrase in ("逐字", "感兴趣", "选择", "跳读")):
             findings.append(
                 Finding(
@@ -2080,7 +2109,7 @@ def audit_draft(
                 Finding(
                     "ERROR",
                     "INTRO_INTERNAL_PROCESS_JARGON",
-                    f"读者导语暴露内部整理流程“{internal_jargon.group()}”；应改成主持人自然说明对谈背景、核心感受和阅读方式。",
+                    f"读者导语暴露内部整理流程“{internal_jargon.group()}”；应按已核发布身份自然说明对谈背景和阅读方式，不补造主持人感受。",
                     str(path),
                 )
             )
@@ -3496,6 +3525,17 @@ def audit_case(case_dir: Path) -> list[Finding]:
     report = read_text(paths["report"])
     evidence = read_text(paths["evidence"])
     coverage = read_text(paths["coverage"]) if paths["coverage"].is_file() else ""
+    raw_full_draft = read_text(paths["full_draft"]) if paths["full_draft"].is_file() else ""
+    scope = read_content_scope(case_dir, source, raw_full_draft)
+    findings.extend(Finding("ERROR", "CONTENT_SCOPE_INVALID", message, str(paths['edit_ledger'])) for message in scope.errors)
+    findings.extend(Finding("WARNING", "CONTENT_SCOPE_PENDING", message, str(paths['edit_ledger'])) for message in scope.warnings)
+    analysis = None
+    try:
+        analysis = build_speaker_analysis(case_dir, source)
+    except ValueError as exc:
+        findings.append(Finding("ERROR", "SPEAKER_ANALYSIS_UNAVAILABLE", str(exc), str(paths['speaker_timeline'])))
+    analysis_source = scope.apply_to_analysis(analysis.source) if analysis is not None else scope.source
+    analysis_turn_count = analysis.count_turns(declared_semantic_end_seconds(coverage), source=analysis_source) if analysis is not None else None
     support = combine_support(paths)
     term_sources = [
         (paths[key], read_text(paths[key]))
@@ -3503,7 +3543,7 @@ def audit_case(case_dir: Path) -> list[Finding]:
         if paths[key].is_file()
     ]
 
-    findings.extend(audit_source(source, paths["source"]))
+    findings.extend(audit_source(analysis.source if analysis is not None else source, paths["source"]))
     if all(
         paths[key].is_file()
         for key in ("speaker_calibration", "speaker_timeline", "speaker_conflicts")
@@ -3520,13 +3560,13 @@ def audit_case(case_dir: Path) -> list[Finding]:
                 paths["speaker_conflicts"],
             )
         )
-    findings.extend(audit_draft(draft, support, paths["draft"], grounding_source=source))
+    findings.extend(audit_draft(draft, support, paths["draft"], grounding_source=analysis_source))
     findings.extend(audit_proper_nouns(draft, term_sources, paths["draft"]))
-    findings.extend(audit_retention(source, draft, paths["draft"], coverage=coverage))
+    findings.extend(audit_retention(analysis_source, draft, paths["draft"], coverage=coverage, source_turn_count=analysis_turn_count))
     if paths["full_draft"].is_file():
         findings.extend(
             audit_full_draft(
-                read_text(paths["full_draft"]),
+                scope.full_draft,
                 draft,
                 paths["full_draft"],
             )
@@ -3542,24 +3582,29 @@ def audit_case(case_dir: Path) -> list[Finding]:
                 issues,
                 draft,
                 paths["edit_ledger"],
+                speaker_analysis=analysis,
             )
         )
-        findings.extend(audit_speaker_attribution(source, draft, edit_ledger, paths["draft"]))
+        try:
+            analysis_ledger = analysis.with_ledger(edit_ledger) if analysis is not None else edit_ledger
+        except ValueError:
+            analysis_ledger = edit_ledger  # audit_edit_ledger already reports the invalid JSON.
+        findings.extend(audit_speaker_attribution(analysis_source, draft, analysis_ledger, paths["draft"]))
         findings.extend(
-            audit_suspicious_speaker_sandwiches(source, edit_ledger, paths["source"])
+            audit_suspicious_speaker_sandwiches(analysis_source, analysis_ledger, paths["source"])
         )
-        findings.extend(audit_source_order(source, draft, edit_ledger, paths["draft"]))
+        findings.extend(audit_source_order(analysis_source, draft, analysis_ledger, paths["draft"]))
         findings.extend(
             audit_timeline_retention(
-                source,
+                analysis_source,
                 draft,
-                edit_ledger,
+                analysis_ledger,
                 paths["draft"],
                 coverage=coverage,
             )
         )
         findings.extend(
-            audit_speaker_retention_balance(source, draft, edit_ledger, paths["draft"])
+            audit_speaker_retention_balance(analysis_source, draft, analysis_ledger, paths["draft"])
         )
     findings.extend(audit_title_number_inventory(draft, issues, paths["issues"]))
     findings.extend(audit_issue_list(issues, paths["issues"], source=source))
@@ -3576,7 +3621,7 @@ def audit_case(case_dir: Path) -> list[Finding]:
             report,
             paths["report"],
             ratio=retention_ratio(
-                source,
+                analysis_source,
                 draft,
                 source_end_seconds=declared_semantic_end_seconds(coverage),
             ),
@@ -3670,11 +3715,15 @@ def audit_human_review_metrics(case_dir: Path, report: str) -> list[Finding]:
     )
     rate = metrics.get("human_modification_rate")
     minutes = metrics.get("human_review_minutes")
+    if not valid_review_date(metrics.get("review_date")):
+        findings.append(Finding("ERROR", "RELEASE_REVIEW_DATE_INVALID", "终审统计中的日期不是有效的YYYY-MM-DD日历日期。", str(metrics_path)))
     if (
         not hash_fields_match
         or not isinstance(rate, (int, float))
+        or not math.isfinite(float(rate))
         or not 0 <= float(rate) <= 1
         or not isinstance(minutes, (int, float))
+        or not math.isfinite(float(minutes))
         or float(minutes) <= 0
     ):
         findings.append(
@@ -3689,6 +3738,8 @@ def audit_human_review_metrics(case_dir: Path, report: str) -> list[Finding]:
 
     reviewer = re.search(r"^- 终审人：\s*(.+)$", report, re.MULTILINE)
     review_date = re.search(r"^- 终审日期：\s*(.+)$", report, re.MULTILINE)
+    if review_date and not valid_review_date(review_date.group(1).strip()):
+        findings.append(Finding("ERROR", "RELEASE_REVIEW_DATE_INVALID", "质检报告中的终审日期无效。", str(report_path)))
     duration = re.search(r"^- 人工终审耗时：\s*(.+)$", report, re.MULTILINE)
     report_minutes = parse_duration_minutes(duration.group(1)) if duration else None
     if (
@@ -3718,6 +3769,11 @@ def audit_release_readiness(case_dir: Path, findings: list[Finding]) -> list[Fin
     report = read_text(report_path) if report_path.is_file() else ""
     draft = read_text(draft_path) if draft_path.is_file() else ""
     release_findings: list[Finding] = []
+    source_path = case_dir/'inputs'/SOURCE_NAME
+    full_path = case_dir/'_work'/FULL_DRAFT_NAME
+    if source_path.is_file() and full_path.is_file():
+        scope = read_content_scope(case_dir, read_text(source_path), read_text(full_path), handoff=True)
+        release_findings.extend(Finding('ERROR','CONTENT_SCOPE_INVALID',message,str(case_dir/'_work'/EDIT_LEDGER_NAME)) for message in scope.errors)
 
     if any(item.code in {"MISSING_REPLAY", "SPEAKER_PREFLIGHT_UNAVAILABLE"} for item in findings):
         release_findings.append(
@@ -3833,12 +3889,13 @@ def audit_release_readiness(case_dir: Path, findings: list[Finding]) -> list[Fin
         or reviewer.group(1).strip() in invalid_values
         or not review_date
         or review_date.group(1).strip() in invalid_values
+        or not valid_review_date(review_date.group(1).strip())
     ):
         release_findings.append(
             Finding(
                 "ERROR",
                 "RELEASE_MISSING_SIGNOFF",
-                "发布审计要求填写终审人和终审日期。",
+                "发布审计要求填写终审人和有效的YYYY-MM-DD终审日期。",
                 str(report_path),
             )
         )

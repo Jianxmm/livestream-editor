@@ -18,5 +18,9 @@
       "status": "待确认",
       "notes": "说明为何这样处理，以及对应待核问题"
     }
-  ]
+  ],
+  "content_scope": {
+    "version": 1,
+    "exclusions": []
+  }
 }

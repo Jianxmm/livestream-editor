@@ -12,6 +12,7 @@ from audit_draft import audit_issue_list
 from audit_solo_share import ALLOWED_STATUSES
 from route_livestream import build_route, write_route, file_sha256
 from build_source_review_index import build_source_review_index
+from route_fixture import observations_for
 
 
 class HandoffGuardTests(unittest.TestCase):
@@ -24,7 +25,7 @@ class HandoffGuardTests(unittest.TestCase):
         self.source.write_text('发言人1   00:00\n仅用于结构测试。\n\n发言人2   00:50\n合成回应。', encoding='utf-8')
         self.replay = self.case / 'inputs/01_直播回放.wav'
         self.replay.write_bytes(b'synthetic media fixture, not real speech')
-        write_route(self.case, build_route(self.case, acoustic_speakers='2', evidence=[str(i) for i in range(5)]))
+        write_route(self.case, build_route(self.case, acoustic_speakers='2', evidence=[str(i) for i in range(5)], observations=observations_for(self.case)))
         calibration = self.case / '_work/说话人校准.json'
         calibration.write_text('{}', encoding='utf-8')
         (self.case / '_work/说话人时间轴.json').write_text(json.dumps({'provenance': {

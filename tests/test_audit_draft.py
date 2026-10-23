@@ -13,6 +13,7 @@ import unittest
 from pathlib import Path
 
 from audit_draft import (
+    audit_draft,
     audit_case,
     audit_coverage_map,
     audit_evidence,
@@ -245,6 +246,12 @@ SPEAKER_CONFLICTS = """# 说话人冲突清单
 
 
 class AuditDraftTest(unittest.TestCase):
+    def test_neutral_introduction_does_not_require_host_first_person(self) -> None:
+        neutral = DRAFT.replace('最近，我和示例嘉宾在直播间做了一场关于重启人生的对谈。',
+                                '这场直播由主持人与示例嘉宾讨论如何重启人生。')
+        findings = audit_draft(neutral, '', Path('synthetic.md'))
+        self.assertFalse(any(item.code in {'MISSING_HOST_FIRST_PERSON', 'MISSING_LIVE_CONTEXT', 'MISSING_READING_GUIDE'} for item in findings), findings)
+
     def make_case(self, root: Path) -> Path:
         (root / "inputs").mkdir()
         (root / "outputs").mkdir()
@@ -327,13 +334,14 @@ class AuditDraftTest(unittest.TestCase):
             (case / "_work" / "说话人校准.json").unlink()
             self.assertIn("MISSING_SPEAKER_PREFLIGHT", self.error_codes(case))
 
-    def test_transcript_only_case_warns_but_does_not_require_preflight_for_draft_audit(self) -> None:
+    def test_transcript_only_case_stops_for_missing_replay_without_fabricating_preflight(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             case = self.make_case(Path(directory))
             (case / "inputs" / "01_直播回放.mp4").unlink()
             for name in ("说话人校准.json", "说话人时间轴.json", "说话人冲突清单.md"):
                 (case / "_work" / name).unlink()
             self.assertNotIn("MISSING_SPEAKER_PREFLIGHT", self.error_codes(case))
+            self.assertIn("MISSING_REPLAY", self.error_codes(case))
             self.assertIn("SPEAKER_PREFLIGHT_UNAVAILABLE", self.warning_codes(case))
             release_codes = {
                 item.code for item in audit_release_readiness(case, audit_case(case))

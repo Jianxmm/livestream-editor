@@ -10,6 +10,7 @@ import unittest
 from pathlib import Path
 
 from route_livestream import build_route, write_route
+from route_fixture import observations_for
 
 
 class RouteLivestreamTests(unittest.TestCase):
@@ -29,7 +30,7 @@ class RouteLivestreamTests(unittest.TestCase):
 
     def test_acoustic_count_routes_to_solo_even_with_two_labels(self) -> None:
         route = build_route(
-            self.case, acoustic_speakers="1", evidence=self.evidence
+            self.case, acoustic_speakers="1", evidence=self.evidence, observations=observations_for(self.case)
         )
         self.assertEqual("solo", route["mode"])
         self.assertEqual("references/solo.md", route["target_skill"])
@@ -37,7 +38,7 @@ class RouteLivestreamTests(unittest.TestCase):
 
     def test_two_acoustic_speakers_route_to_dual(self) -> None:
         route = build_route(
-            self.case, acoustic_speakers="2", evidence=self.evidence
+            self.case, acoustic_speakers="2", evidence=self.evidence, observations=observations_for(self.case)
         )
         self.assertEqual("dual", route["mode"])
         self.assertEqual("PASS", route["status"])
@@ -55,7 +56,7 @@ class RouteLivestreamTests(unittest.TestCase):
 
     def test_existing_different_route_is_not_overwritten(self) -> None:
         route = build_route(
-            self.case, acoustic_speakers="1", evidence=self.evidence
+            self.case, acoustic_speakers="1", evidence=self.evidence, observations=observations_for(self.case)
         )
         output = write_route(self.case, route)
         before = output.read_text(encoding="utf-8")

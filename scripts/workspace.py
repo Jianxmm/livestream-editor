@@ -247,9 +247,13 @@ def probe(case: Path) -> Path:
                 windows[key] = name
             name = windows[key]
             items.append({'position':positions[index], 'file':name,
-                          'start_seconds':start, 'duration_seconds':seconds})
+                          'start_seconds':start, 'duration_seconds':seconds,
+                          'audio_sha256':file_sha256(stage/name)})
         write_json(stage / 'manifest.json', {'source_sha256':file_sha256(replay),
+                   'source_duration_seconds':length,
                    'unique_clip_count':len(windows), 'clips':items})
+        write_json(stage / '核验记录.json', [{'position':item['position'],'start_seconds':item['start_seconds'],
+                   'end_seconds':item['start_seconds']+item['duration_seconds'],'method':'待填写','finding':'填写实际发现'} for item in items])
         lines = ['# 分流回听\n', '核对真实声音；短片仅辅助抽查，不能证明整场只有这些说话人。标签冲突处另外回听。\n']
         for name in windows.values():
             linked=[item for item in items if item['file']==name]
@@ -263,28 +267,183 @@ def probe(case: Path) -> Path:
 
 
 def export_outputs(case: Path, destination: Path) -> Path:
-    source = (case / 'outputs').resolve()
-    destination = destination.expanduser().resolve()
+    import html
+    import posixpath
+    import re
+    from urllib.parse import quote, unquote, urlsplit, urlunsplit
+
+    case = case.expanduser().resolve()
+    source = case / 'outputs'
+    destination = destination.expanduser()
+    if source.is_symlink() or destination.is_symlink():
+        raise ValueError('导出源或目标是符号链接，请先核对真实目录')
+    destination = destination.resolve()
     if not source.is_dir():
         raise ValueError('缺少 outputs 目录')
-    if destination.is_relative_to(source) or source.is_relative_to(destination):
-        raise ValueError('导出目录与源目录不能互相包含')
+    if destination.is_relative_to(case) or source.is_relative_to(destination):
+        raise ValueError('阅读副本须位于本场案例之外，且不能包含源目录')
     files = list(source.rglob('*'))
     if any(p.is_symlink() for p in files):
         raise ValueError('导出中存在符号链接，请先核对内容')
     required = ['01_公众号可发布稿.md', '02_待核问题清单.md', '03_编辑质检报告.md']
     if any(not (source / n).is_file() for n in required):
         raise ValueError('三份固定交付尚未齐全')
+
+    work = case / '_work'
+    materials = '核对材料'
+    document_names = ('待核原文索引.md', '回听辅助索引.md', '回听终审表.md')
+    audio_suffixes = {'.m4a', '.mp3', '.wav', '.aac', '.flac', '.ogg', '.opus'}
+    mapped, owners, payloads, pending = {}, {}, {}, []
+
+    def checked(path: Path) -> Path:
+        path = Path(os.path.normpath(path))
+        if not path.is_relative_to(case):
+            raise ValueError(f'阅读材料越出本场案例：{path.name}')
+        relative = path.relative_to(case)
+        if any((case / Path(*relative.parts[:i])).is_symlink() for i in range(1, len(relative.parts) + 1)):
+            raise ValueError(f'阅读材料经过符号链接：{relative.as_posix()}')
+        if not path.is_file():
+            raise FileNotFoundError(f'阅读材料缺失：{relative.as_posix()}')
+        return path
+
+    def include(path: Path) -> str:
+        path = checked(path)
+        if path in mapped:
+            return mapped[path]
+        if path.is_relative_to(source):
+            relative = path.relative_to(source).as_posix()
+        elif path.parent == work and path.name in document_names:
+            relative = materials + '/' + path.name
+        elif path.parent == work / 'review_clips' and path.suffix.lower() in audio_suffixes:
+            relative = materials + '/review_clips/' + path.name
+        else:
+            raise ValueError(f'链接指向非阅读材料，不自动复制：{path.relative_to(case).as_posix()}')
+        if relative in owners and owners[relative] != path:
+            raise ValueError(f'阅读材料名称冲突，请使用独立副本目录：{relative}')
+        mapped[path], owners[relative] = relative, path
+        pending.append(path)
+        return relative
+
+    for path in files:
+        if path.is_file():
+            include(path)
+    material_links = []
+    for name in document_names:
+        path = work / name
+        if path.exists() or path.is_symlink():
+            material_links.append((name.removesuffix('.md'), include(path)))
+
+    manifest_path = work / 'review_clips/manifest.json'
+    if manifest_path.exists() or manifest_path.is_symlink():
+        manifest = json.loads(checked(manifest_path).read_text(encoding='utf-8-sig'))
+        clips, samples = manifest.get('clips', []), manifest.get('samples', [])
+        if not isinstance(clips, list) or not isinstance(samples, list):
+            raise ValueError('回听材料清单格式错误')
+        audio_lines = ['# 回听音频', '', '音频只辅助核对原话，不代表已完成人工终审。', '']
+        seen_audio = set()
+        for item in clips + samples:
+            if not isinstance(item, dict):
+                raise ValueError('回听材料清单格式错误')
+            filename = item.get('filename', '')
+            if not isinstance(filename, str) or not filename or '/' in filename or '\\' in filename or Path(filename).name != filename:
+                raise ValueError('回听材料清单含无效文件名')
+            audio = checked(work / 'review_clips' / filename)
+            if item.get('audio_sha256') and file_sha256(audio) != item['audio_sha256']:
+                raise ValueError(f'回听音频与清单不一致：{filename}')
+            include(audio)
+            if filename not in seen_audio:
+                label = str(item.get('timecode', filename)).replace('\n', ' ')
+                audio_lines.append(f'- {label}：[打开音频](review_clips/{quote(filename)})')
+                seen_audio.add(filename)
+        if seen_audio and not (work / '回听辅助索引.md').exists():
+            relative = materials + '/回听音频.md'
+            if relative in owners:
+                raise ValueError('回听音频入口与已有文件同名')
+            payloads[relative] = ('\n'.join(audio_lines) + '\n').encode('utf-8')
+            material_links.append(('回听音频', relative))
+
+    markdown_link = re.compile(r'(!?\[[^\]\r\n]*\]\()(<[^>\r\n]+>|[^\s)\r\n]+)((?:[ \t]+[\'\"][^\r\n]*[\'\"])?\))')
+    reference_link = re.compile(r'^(\[[^\]\r\n]+\]:[ \t]*)(<[^>\r\n]+>|[^\s\r\n]+)', re.M)
+    html_link = re.compile(r'(\b(?:src|href)\s*=\s*)([\'\"])([^\'\"]+)\2', re.I)
+
+    def rewrite_url(raw: str, path: Path) -> str:
+        wrapped = raw.startswith('<') and raw.endswith('>')
+        value = raw[1:-1] if wrapped else raw
+        parts = urlsplit(html.unescape(value))
+        if parts.scheme or parts.netloc:
+            if parts.scheme.lower() == 'file' or re.match(r'^[A-Za-z]:[\\/]', value):
+                raise ValueError('阅读材料不能依赖本机绝对路径')
+            return raw
+        if not parts.path:
+            return raw
+        local = unquote(parts.path)
+        if local.startswith('/') or '\\' in local:
+            raise ValueError('阅读材料不能依赖本机绝对路径或反斜线路径')
+        relative = include(path.parent / local)
+        current_parent = posixpath.dirname(mapped[path]) or '.'
+        replacement = posixpath.relpath(relative, current_parent)
+        # Existing in-folder links need no change, preserving prose and formatting.
+        if replacement == local:
+            return raw
+        value = urlunsplit(('', '', quote(replacement, safe='/'), parts.query, parts.fragment))
+        return '<' + value + '>' if wrapped else value
+
+    def rewrite_document(text: str, path: Path) -> str:
+        output, fence = [], None
+        for line in text.splitlines(keepends=True):
+            marker = re.match(r'^[ \t]{0,3}(`{3,}|~{3,})(.*)$', line.rstrip('\r\n'))
+            if marker and fence is None:
+                fence = marker.group(1)
+                output.append(line)
+                continue
+            if fence is not None:
+                output.append(line)
+                if marker and marker.group(1)[0] == fence[0] and len(marker.group(1)) >= len(fence) and not marker.group(2).strip():
+                    fence = None
+                continue
+            # Link-looking text inside code examples is not a reading dependency.
+            spans = []
+            def hide_code(match):
+                spans.append(match.group())
+                return f'\x00CODE{len(spans) - 1}\x00'
+            line = re.sub(r'(`+)(.+?)\1', hide_code, line)
+            line = markdown_link.sub(lambda m: m.group(1) + rewrite_url(m.group(2), path) + m.group(3), line)
+            line = reference_link.sub(lambda m: m.group(1) + rewrite_url(m.group(2), path), line)
+            line = html_link.sub(lambda m: m.group(1) + m.group(2) + rewrite_url(m.group(3), path) + m.group(2), line)
+            for index, value in enumerate(spans):
+                line = line.replace(f'\x00CODE{index}\x00', value)
+            output.append(line)
+        return ''.join(output)
+
+    while pending:
+        path = pending.pop(0)
+        data = path.read_bytes()
+        if path.suffix.lower() in {'.md', '.html', '.htm'}:
+            data = rewrite_document(data.decode('utf-8'), path).encode('utf-8')
+        payloads[mapped[path]] = data
+
+    entry = '00_从这里开始.md'
+    if entry not in payloads:
+        payloads[entry] = ('# 整理结果\n\n' + '\n'.join(f'- [{name}]({quote(name)})' for name in required) + '\n').encode('utf-8')
+    if material_links:
+        links = '\n\n## 核对材料\n\n' + '\n'.join(f'- [{label}]({quote(relative, safe="/")})' for label, relative in material_links) + '\n'
+        payloads[entry] += links.encode('utf-8')
+
     if destination.exists():
-        if all((destination / p.relative_to(source)).is_file() and file_sha256(p) == file_sha256(destination / p.relative_to(source)) for p in files if p.is_file()):
+        if any(path.is_symlink() for path in destination.rglob('*')):
+            raise ValueError('阅读副本中存在符号链接，请先核对内容')
+        if all((destination / name).is_file() and (destination / name).read_bytes() == data for name, data in payloads.items()):
             return destination
         raise FileExistsError('导出目标已有不同内容，可能含人工修改；请使用新目录，禁止自动覆盖。')
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=destination.parent) as temp:
         stage = Path(temp) / 'outputs'
-        shutil.copytree(source, stage)
-        for p in files:
-            if p.is_file() and file_sha256(p) != file_sha256(stage / p.relative_to(source)):
+        stage.mkdir()
+        for name, data in payloads.items():
+            target = stage / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+            if target.read_bytes() != data:
                 raise RuntimeError('导出校验失败')
         stage.rename(destination)
     return destination

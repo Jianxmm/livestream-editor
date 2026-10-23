@@ -3,18 +3,71 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 import struct
 import subprocess
 import sys
 import tempfile
 import wave
+from urllib.parse import unquote, urlsplit
 
-from workspace import doctor, init_case, export_outputs, ROOT
+from workspace import doctor, init_case, export_outputs, probe, ROOT
 from media_tools import audio_clip, duration
 from extract_full_audio import extract_full_audio
 from build_source_review_index import build_source_review_index
-from route_livestream import file_sha256
+from route_livestream import file_sha256, build_route, write_route, route_position_errors
+from extract_review_clips import extract_review_package
+
+
+def continuation_smoke(root: Path, short_media: Path) -> None:
+    """Real encoding plus synthetic proof records, never human review evidence."""
+    media=root/'长合成音调.wav'
+    with wave.open(str(short_media),'rb') as source:
+        params=source.getparams();frames=source.readframes(source.getnframes())
+    with wave.open(str(media),'wb') as output:
+        output.setparams(params)
+        for _ in range(6):output.writeframes(frames)
+    transcript=root/'续作原稿.md'
+    transcript.write_text('发言人1 00:00\n合成技术测试开场。\n\n发言人1 00:10\n旧问题合成文字。\n\n发言人1 01:30\n新问题合成文字。\n\n发言人1 02:40\n合成技术测试结尾。\n',encoding='utf-8')
+    case=init_case(root/'合成续作案例',media,transcript)
+    folder=probe(case)
+    records=json.loads((folder/'核验记录.json').read_text(encoding='utf-8'))
+    for row in records:
+        row.update(method='音频理解（合成测试记录，不是真人回听）',finding='合成夹具预设一个声音，仅测试记录链路，不构成真实人数证据')
+    route=build_route(case,acoustic_speakers='1',evidence=[],observations=records)
+    write_route(case,route)
+    assert not route_position_errors(case,route)
+    issue_path=case/'outputs/02_待核问题清单.md'
+    header='| 级别 | 时间码 | 问题类型 | 原文/成稿 | 处理建议 | 状态 |\n| --- | --- | --- | --- | --- | --- |\n'
+    old='| P1 | 00:10 | 技术样例 | 旧问题合成文字 | 合成核验 | 待确认 |\n'
+    issue_path.write_text(header+old,encoding='utf-8')
+    extract_review_package(case)
+    manifest_path=case/'_work/review_clips/manifest.json'
+    first=json.loads(manifest_path.read_text(encoding='utf-8'))
+    sheet=case/'_work/回听终审表.md'
+    filled=sheet.read_text(encoding='utf-8').replace('| 待填 | 待定 | 待填 |','| 合成核验文字 | 合成保留 | 合成测试人 / 2026-10-23 |')
+    sheet.write_text(filled,encoding='utf-8')
+    issue_path.write_text(header+old.replace('待确认','已回听')+'| P1 | 01:30 | 技术样例 | 新问题合成文字 | 合成核验 | 待确认 |\n',encoding='utf-8')
+    extract_review_package(case)
+    current=json.loads(manifest_path.read_text(encoding='utf-8'))
+    old_clips=[row for row in current['clips'] if row['issue_text']=='旧问题合成文字']
+    assert old_clips==first['clips']
+    assert '合成测试人 / 2026-10-23' in sheet.read_text(encoding='utf-8')
+    assert any(row['issue_text']=='新问题合成文字' and row['issue_index']!=old_clips[0]['issue_index'] for row in current['clips'])
+    build_source_review_index(case)
+    for name in ['01_公众号可发布稿.md','03_编辑质检报告.md']:
+        (case/'outputs'/name).write_text('# 合成技术测试\n非实际编辑结果。',encoding='utf-8')
+    exported=export_outputs(case,root/'独立核对阅读包')
+    case.rename(root/'源案例已移走')
+    assert list((exported/'核对材料').rglob('*.m4a'))
+    for page in exported.rglob('*.md'):
+        text=page.read_text(encoding='utf-8')
+        assert '../_work/' not in text
+        for target in re.findall(r'\]\(([^)]+)\)',text):
+            parts=urlsplit(target)
+            if not parts.scheme and parts.path:
+                assert (page.parent/unquote(parts.path)).is_file(), (page,target)
 
 
 def smoke() -> dict:
@@ -58,7 +111,8 @@ def smoke() -> dict:
         except FileExistsError:pass
         else:raise AssertionError('导出覆盖保护未生效')
         assert edited.read_text(encoding='utf-8')=='模拟人工修改'
-    return {'status':'PASS','checks':['中文空格路径','输入不变','SRT导入及真实回放时长匹配','整场音频时长及哈希','音频幂等复用','短音频真实转换','回听包重复生成及输入变更保护','原文索引','人工修改保护'],
+        continuation_smoke(root,media)
+    return {'status':'PASS','checks':['中文空格路径','输入不变','SRT导入及真实回放时长匹配','整场音频时长及哈希','音频幂等复用','短音频真实转换','回听包重复生成及输入变更保护','原文索引','人工修改保护','五位置实际编码和结构化分流','关闭旧问题后追加新问题','移走源案例后的阅读核对链接'],
             'scope':'技术链路自检；合成音调不证明说话人分离准确率、文稿质量或真人终审完成。'}
 
 def main() -> int:

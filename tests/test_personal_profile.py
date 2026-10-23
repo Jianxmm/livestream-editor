@@ -12,6 +12,7 @@ from personal_profile import (ROOT, PROFILE_FILES, init_profile, inspect_profile
 from workspace import init_case
 from build_release import release_files
 from route_livestream import build_route, write_route
+from route_fixture import observations_for
 from build_source_review_index import build_source_review_index
 from audit_package import shared_errors
 
@@ -134,7 +135,7 @@ class PersonalProfileTests(unittest.TestCase):
 
     def test_snapshot_change_is_rejected_by_real_package_audit(self):
         case = init_case(self.root / '案例', self.media, self.transcript, profile=self.profile)
-        write_route(case, build_route(case, acoustic_speakers='1', evidence=[str(i) for i in range(5)]))
+        write_route(case, build_route(case, acoustic_speakers='1', evidence=[], observations=observations_for(case)))
         (case / 'outputs/02_待核问题清单.md').write_text('# 无待核问题', encoding='utf-8')
         build_source_review_index(case)
         self.assertEqual(shared_errors(case), ('solo', []))

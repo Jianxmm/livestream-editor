@@ -12,6 +12,7 @@ from workspace import init_case, inspect_case, input_manifest_errors, templates,
 from route_livestream import build_route, file_sha256, valid_default_map
 from speaker_pipeline import align_blocks, validate_calibration
 from build_source_review_index import build_source_review_index
+from route_fixture import observations_for
 from audit_package import shared_errors
 
 SRT = '1\r\n00:00:00,120 --> 00:00:01,800\r\n第一行，保留。\r\n第二行 &amp; 数字123。\r\n\r\n2\r\n00:00:02,900 --> 00:00:04,300\r\n<b>原样的观点</b>\r\n'
@@ -89,7 +90,7 @@ class SubtitleTests(unittest.TestCase):
                 result = inspect_case(case)
             self.assertEqual(result['errors'], [])
             self.assertTrue(any('标签' in w for w in result['warnings']))
-            route = build_route(case, acoustic_speakers='2', evidence=[f'真实核验占位仅用于测试{i}' for i in range(5)])
+            route = build_route(case, acoustic_speakers='2', evidence=[f'合成记录{i}' for i in range(5)], observations=observations_for(case))
             self.assertEqual(route['mode'], 'dual')
             self.assertTrue(any('未标注' in warning for warning in route['warnings']))
             (case / '_work/场次分流.json').write_text(json.dumps(route), encoding='utf-8')
@@ -107,7 +108,7 @@ class SubtitleTests(unittest.TestCase):
             (case / '_work/输入来源.json').unlink()
             self.assertTrue(any('缺少输入来源' in e for e in input_manifest_errors(case)))
 
-    def test_unlabelled_dual_input_requires_explicit_conflicts_instead_of_guessed_identity(self):
+    def test_unlabelled_dual_input_uses_clean_acoustics_and_keeps_uncertainty_pending(self):
         mapping = {'发言人未标注': None}
         self.assertTrue(valid_default_map(mapping, {'A', 'B'}, {'发言人未标注'}))
         self.assertFalse(valid_default_map({'发言人未标注': 'A'}, {'A', 'B'}))
@@ -122,7 +123,11 @@ class SubtitleTests(unittest.TestCase):
         validate_calibration({'status': '已确认', 'speakers': people, 'source_label_default_map': mapping}, 70)
         segments = [{'id': 's1', 'start_seconds': 0, 'end_seconds': 10, 'speaker_id': 'A', 'uncertain': False, 'overlap': False}]
         blocks, conflicts = align_blocks('发言人未标注 00:00\n原话。', segments, mapping, 10)
-        self.assertEqual(blocks[0]['status'], '冲突待核')
+        self.assertEqual(blocks[0]['status'], '声学归属')
+        self.assertEqual(len(conflicts), 0)
+        uncertain = [dict(segments[0], uncertain=True)]
+        blocks, conflicts = align_blocks('发言人未标注 00:00\n原话。', uncertain, mapping, 10)
+        self.assertEqual(blocks[0]['status'], '无法映射')
         self.assertEqual(len(conflicts), 1)
 
     def test_caption_end_beyond_media_is_reported(self):

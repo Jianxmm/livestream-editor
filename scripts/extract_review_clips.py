@@ -10,11 +10,13 @@ import random
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from route_livestream import find_replay, file_sha256
 from media_tools import audio_clip, duration
+from build_source_review_index import raw_timecode
 
 
 TIMESTAMP_RE = re.compile(r"(?<!\d)(?:\d{1,2}:)?\d{2}:\d{2}(?!\d)")
@@ -55,6 +57,53 @@ class ReviewClip:
     start: int
     duration: int
     filename: str
+    issue_id: str = ""
+
+
+def issue_identity(item: dict[str, object]) -> tuple[str, str, str, str]:
+    return (str(item.get('priority', '')), raw_timecode(str(item.get('timecode', ''))),
+            str(item.get('issue_type', '')), str(item.get('issue_text', '')))
+
+
+def issue_id(item: dict[str, object]) -> str:
+    encoded = json.dumps(issue_identity(item), ensure_ascii=False).encode('utf-8')
+    return 'I' + hashlib.sha256(encoded).hexdigest()[:20]
+
+
+def review_issues(text: str) -> list[dict[str, object]]:
+    rows, seen = [], set()
+    for line in text.splitlines():
+        if not ISSUE_ROW_RE.match(line):
+            continue
+        cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+        if len(cells) != 6:
+            raise ValueError('待核问题需保留六列表格，不能截断人工填写的内容。')
+        row = dict(zip(('priority', 'timecode', 'issue_type', 'issue_text', 'action', 'status'), cells))
+        row['timecode'] = raw_timecode(row['timecode'])
+        row['issue_id'] = issue_id(row)
+        if row['issue_id'] in seen:
+            raise ValueError('同一时间和内容的待核问题重复，无法唯一对应人工结论；请先核对重复行。')
+        seen.add(row['issue_id'])
+        rows.append(row)
+    return rows
+
+
+def stored_clip(item: dict[str, object]) -> ReviewClip:
+    required = ('priority', 'issue_index', 'timecode', 'issue_type', 'issue_text', 'start', 'duration', 'filename')
+    if not isinstance(item, dict) or any(key not in item for key in required):
+        raise ValueError('旧回听清单缺少时间窗口或问题信息，不能自动迁移人工结论。')
+    name = item['filename']
+    if not isinstance(name, str) or Path(name).name != name or '/' in name or '\\' in name or name in {'', '.', '..'}:
+        raise ValueError('回听清单包含越界音频文件名。')
+    index, start, length = item['issue_index'], item['start'], item['duration']
+    if not isinstance(index, int) or isinstance(index, bool) or index < 1:
+        raise ValueError('旧回听问题编号无效。')
+    if any(not isinstance(n, (int, float)) or isinstance(n, bool) or not 0 <= n < float('inf') for n in (start, length)) or length <= 0:
+        raise ValueError('旧回听音频时间窗口无效。')
+    values = {key: item[key] for key in required}
+    values['timecode'] = raw_timecode(str(values['timecode']))
+    values['issue_id'] = '' if item['priority'] == 'SAMPLE' else issue_id(item)
+    return ReviewClip(**values)
 
 
 def split_window(start: int, end: int, *, padding: int, max_duration: int) -> list[tuple[int, int]]:
@@ -299,7 +348,12 @@ def install_staged_package(
     output_dir.mkdir(parents=True, exist_ok=True)
     previous = managed_clip_filenames(output_dir / "manifest.json")
     for filename in sorted(desired):
-        (staging_dir / filename).replace(output_dir / filename)
+        target = output_dir / filename
+        if target.is_symlink():
+            raise ValueError('回听目标音频是符号链接，停止写入。')
+        if target.is_file() and file_sha256(target) == file_sha256(staging_dir / filename):
+            continue  # Preserve unchanged evidence bytes and timestamps.
+        (staging_dir / filename).replace(target)
     removed = 0
     for filename in previous - desired:
         candidate = output_dir / filename
@@ -322,6 +376,288 @@ def install_staged_package(
 REVIEW_SHEET_NAME = "回听终审表.md"
 
 
+def plan_incremental_clips(text: str, previous: dict, *, padding: int = 8,
+                           max_duration: int = 90) -> tuple[list[ReviewClip], list[dict]]:
+    """Preserve issue numbers independently of row order and pending/closed state."""
+    rows = review_issues(text)
+    registry, indexes, groups = {}, {}, {}
+    for record in previous.get('issue_registry', []):
+        if not isinstance(record, dict) or record.get('issue_id') != issue_id(record):
+            raise ValueError('旧问题登记表身份不完整，不能自动沿用人工结论。')
+        if record['issue_id'] in registry:
+            raise ValueError('旧问题登记表存在重复身份，不能自动迁移人工结论。')
+        registry[record['issue_id']] = dict(record, active=False)
+    for raw in previous.get('clips', []):
+        clip = stored_clip(raw)
+        groups.setdefault(clip.issue_id, []).append(clip)
+        registry.setdefault(clip.issue_id, dict(zip(
+            ('priority', 'timecode', 'issue_type', 'issue_text'), issue_identity(raw)),
+            issue_id=clip.issue_id, issue_index=clip.issue_index, active=False))
+    for key, record in registry.items():
+        index = record.get('issue_index')
+        if not isinstance(index, int) or isinstance(index, bool) or index < 1 or (index in indexes and indexes[index] != key):
+            raise ValueError('旧问题编号不唯一，不能把人工结论移给另一个问题。')
+        indexes[index] = key
+        if any(clip.issue_index != index for clip in groups.get(key, [])):
+            raise ValueError('旧回听清单的问题编号与登记表不一致。')
+    next_index, clips = max(indexes, default=0) + 1, []
+    for row in rows:
+        key = row['issue_id']
+        if key not in registry:
+            registry[key] = {k: row[k] for k in ('priority', 'timecode', 'issue_type', 'issue_text', 'issue_id')}
+            registry[key]['issue_index'] = next_index
+            next_index += 1
+        registry[key].update(active=True, status=row['status'])
+        index = registry[key]['issue_index']
+        if key in groups:
+            clips.extend(groups[key])
+            continue
+        if row['status'] == '已回听':
+            raise ValueError(f"{row['timecode']} 标为已回听，但没有本问题对应的旧音频和结论；请按实际情况重新核验，不能沿用另一问题的结论。")
+        if row['status'] != '待确认':
+            continue
+        line = '| ' + ' | '.join(str(row[k]) for k in ('priority', 'timecode', 'issue_type', 'issue_text', 'action', 'status')) + ' |'
+        parsed = parse_review_clips(line, padding=padding, max_duration=max_duration)
+        if not parsed:
+            raise ValueError(f"{row['timecode']} 缺少可定位的回听时间码。")
+        for number, clip in enumerate(parsed, 1):
+            clips.append(replace(clip, issue_index=index, issue_id=key,
+                                 filename=f'{clip.priority}-{index:02d}-{number:02d}-{format_seconds(clip.start)}.m4a'))
+    return share_duplicate_windows(sorted(clips, key=lambda c: (c.issue_index, c.start))), sorted(registry.values(), key=lambda r: r['issue_index'])
+
+
+def stable_samples(source: str, clips: list[ReviewClip], previous: dict) -> list[ReviewClip]:
+    old = [stored_clip(item) for item in previous.get('samples', [])]
+    # New facts may now occupy an old random sample. Only those samples lose their independent status.
+    kept = [sample for sample in old if not any(
+        sample.start < clip.start + clip.duration and clip.start < sample.start + sample.duration for clip in clips)]
+    if not old:
+        return select_stratified_samples(source, clips)
+    if len(kept) >= 5:
+        return kept
+    candidates = select_stratified_samples(source, clips + kept)
+    used_indexes = {sample.issue_index for sample in kept}
+    for candidate in candidates:
+        if len(kept) >= 5:
+            break
+        if any(candidate.start < sample.start + sample.duration and sample.start < candidate.start + candidate.duration for sample in kept):
+            continue
+        index = next(n for n in range(1, len(kept) + 2) if n not in used_indexes)
+        used_indexes.add(index)
+        kept.append(replace(candidate, issue_index=index, filename=f'SAMPLE-{index:02d}-{format_seconds(candidate.start)}.m4a'))
+    return sorted(kept, key=lambda sample: sample.issue_index)
+
+
+def sheet_rows(text: str, clips: list[ReviewClip], samples: list[ReviewClip]) -> tuple[dict, set[int]]:
+    """Identify managed rows only when their metadata still describes the previous package."""
+    lines, result, managed = text.splitlines(), {}, set()
+    groups = {}
+    for clip in clips:
+        groups.setdefault(clip.issue_index, []).append(clip)
+    expected = {('issue', index): items for index, items in groups.items()}
+    expected.update({('sample', sample.filename): [sample] for sample in samples})
+    for key, items in expected.items():
+        first = items[0]
+        filenames = {item.filename for item in items}
+        matches = []
+        for number, line in enumerate(lines):
+            if not line.startswith('|'):
+                continue
+            cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+            if key[0] == 'issue':
+                found = len(cells) == 7 and cells[0] == str(first.issue_index)
+                valid = found and raw_timecode(cells[1]) == first.timecode and cells[2] == first.issue_type + '：' + first.issue_text.replace('|', '／')
+            else:
+                found = len(cells) == 5 and cells[0] == first.timecode and first.filename in review_sheet_clip_filenames(line)
+                valid = found
+            if found:
+                if not valid or review_sheet_clip_filenames(line) != filenames:
+                    raise ValueError('终审表的核验内容或音频被人工改动，无法安全合并；原文件保留，请先核对。')
+                matches.append((number, line))
+        if len(matches) != 1:
+            raise ValueError('终审表未唯一对应旧问题或音频，无法安全合并；原文件保留。')
+        result[key] = matches[0]
+        managed.add(matches[0][0])
+    for number, line in enumerate(lines):
+        if review_sheet_clip_filenames(line) and number not in managed:
+            raise ValueError('终审表含有无法对应旧清单的音频行，不能自动覆盖。')
+    return result, managed
+
+
+def merge_review_sheet(text: str, old_clips: list[ReviewClip], old_samples: list[ReviewClip],
+                       clips: list[ReviewClip], samples: list[ReviewClip]) -> str:
+    old_rows, managed = sheet_rows(text, old_clips, old_samples)
+    fresh_rows, _ = sheet_rows(render_review_sheet(clips, samples), clips, samples)
+    lines, replacements, new_issues, new_samples = text.splitlines(), {}, [], []
+    for key, (_, new_line) in fresh_rows.items():
+        if key in old_rows:
+            position, old_line = old_rows[key]
+            if key[0] == 'issue':
+                # Link anchors in a timecode can move when source-index renumbers rows.
+                # Keep all human answer cells verbatim; normalize only the time metadata.
+                cells = old_line.split('|')
+                plain = next(c for c in clips if c.issue_index == key[1]).timecode
+                if cells[2].strip() != plain:
+                    cells[2] = ' ' + plain + ' '
+                    old_line = '|'.join(cells)
+            replacements[position] = old_line
+        elif key[0] == 'issue':
+            new_issues.append(new_line)
+        else:
+            new_samples.append(new_line)
+    issue_markers = [i for i, line in enumerate(lines) if line.strip() == '## 随机抽听']
+    if new_issues and len(issue_markers) != 1:
+        raise ValueError('终审表的段落结构已改变，无法安全追加问题；请保留原表后核对。')
+    sample_rows = [number for key, (number, _) in old_rows.items() if key[0] == 'sample']
+    sample_headers = [i for i, line in enumerate(lines) if line.startswith('| 时间码 | 音频文件 |')]
+    sample_insertion = max(sample_rows) + 1 if sample_rows else sample_headers[0] + 2 if len(sample_headers) == 1 else None
+    if new_samples and sample_insertion is None:
+        raise ValueError('终审表的随机抽听表结构已改变，不能自动覆盖。')
+    output = []
+    for number in range(len(lines) + 1):
+        if new_issues and number == issue_markers[0]:
+            output.extend(new_issues + [''])
+        if new_samples and number == sample_insertion:
+            output.extend(new_samples)
+        if number < len(lines):
+            if number in replacements:
+                output.append(replacements[number])
+            elif number not in managed:
+                output.append(lines[number])
+    return '\n'.join(output) + ('\n' if text.endswith('\n') else '')
+
+
+def archive_previous_package(output_dir: Path, sheet: Path) -> Path | None:
+    manifest_path = output_dir / 'manifest.json'
+    if not manifest_path.exists():
+        return None
+    payload = manifest_path.read_bytes() + (sheet.read_bytes() if sheet.exists() else b'')
+    history = output_dir / 'history'
+    if history.is_symlink():
+        raise ValueError('回听历史目录是符号链接，停止写入以保护原文件。')
+    history.mkdir(exist_ok=True)
+    target = history / hashlib.sha256(payload).hexdigest()[:24]
+    names = managed_clip_filenames(manifest_path) | {'manifest.json'}
+    if (output_dir / 'machine_transcripts.json').exists():
+        names.add('machine_transcripts.json')
+    with tempfile.TemporaryDirectory(prefix='.archive-', dir=history) as directory:
+        stage = Path(directory) / 'snapshot'; stage.mkdir()
+        for name in names:
+            source = output_dir / name
+            if Path(name).name != name or '\\' in name or source.is_symlink():
+                raise ValueError('旧回听清单含越界文件或链接，停止归档。')
+            if source.is_file():
+                shutil.copy2(source, stage / name)
+        if sheet.exists():
+            shutil.copy2(sheet, stage / REVIEW_SHEET_NAME)
+        if target.exists():
+            if any(not (target/p.name).is_file() or file_sha256(target/p.name) != file_sha256(p) for p in stage.iterdir()):
+                raise ValueError('已有回听历史与待归档内容不同，保留现场。')
+        else:
+            stage.rename(target)
+    return target
+
+
+def extract_review_package(case_dir: Path, *, padding: int = 8, max_duration: int = 90,
+                           refresh_review_sheet: bool = False, dry_run: bool = False) -> dict:
+    if not isinstance(padding, int) or padding < 0 or not isinstance(max_duration, int) or max_duration < 10:
+        raise ValueError('回听补充秒数需为非负整数，单片段上限需为至少10秒的整数。')
+    case_dir = case_dir.expanduser().resolve()
+    replay = find_replay(case_dir)
+    source_path = case_dir / 'inputs/02_带时间码原稿.md'
+    issue_path = case_dir / 'outputs/02_待核问题清单.md'
+    output_dir = case_dir / '_work/review_clips'
+    review_sheet = case_dir / '_work' / REVIEW_SHEET_NAME
+    if (case_dir/'_work').is_symlink() or output_dir.is_symlink() or review_sheet.is_symlink():
+        raise ValueError('回听目录或终审表经过符号链接，停止写入以保护人工文件。')
+    previous_path = output_dir / 'manifest.json'
+    if previous_path.is_symlink():
+        raise ValueError('回听清单是符号链接，停止写入。')
+    previous = json.loads(previous_path.read_text(encoding='utf-8-sig')) if previous_path.exists() else {}
+    if not isinstance(previous, dict):
+        raise ValueError('旧回听清单格式无效，保留原终审包。')
+    replay_hash, transcript_hash = file_sha256(replay), file_sha256(source_path)
+    if previous and (previous.get('source_sha256') != replay_hash or previous.get('transcript_sha256') != transcript_hash):
+        raise ValueError('回放或原稿变化，不能沿用旧回听结论；请先比较并归档旧终审包。')
+    old_clips = [stored_clip(item) for item in previous.get('clips', [])]
+    old_samples = [stored_clip(item) for item in previous.get('samples', [])]
+    old_sheet = review_sheet.read_text(encoding='utf-8-sig') if review_sheet.exists() else None
+    if old_sheet is not None and not previous:
+        raise ValueError('已有终审表但缺少对应旧清单，不能自动覆盖或迁移人工结论。')
+    if previous and old_sheet is None:
+        raise ValueError('旧回听清单存在但终审表缺失，无法确认人工结论；请先核对并恢复原表。')
+    if old_sheet is not None:
+        old_rows, _ = sheet_rows(old_sheet, old_clips, old_samples)
+        if refresh_review_sheet:
+            for key, (_, line) in old_rows.items():
+                cells = [cell.strip() for cell in line.strip().strip('|').split('|')]
+                tail = cells[-3:]
+                if any(cell not in {'待填', '待定', '待确认', '未完成', ''} for cell in tail):
+                    raise ValueError('终审表已有人工结论，不能用刷新参数清空；请按增量续作保留结论。')
+    prior_windows = {}
+    for item in previous.get('clips', []) + previous.get('samples', []):
+        clip = stored_clip(item); path = output_dir / clip.filename
+        window = (clip.start, clip.duration, item.get('audio_sha256'))
+        if clip.filename in prior_windows and prior_windows[clip.filename] != window:
+            raise ValueError('同一旧音频对应不同窗口，不能沿用人工核验结论。')
+        prior_windows[clip.filename] = window
+        if path.is_symlink() or not path.is_file() or not item.get('audio_sha256') or file_sha256(path) != item['audio_sha256']:
+            raise ValueError(f'旧回听音频缺失或变化，不能静默替换后沿用人工结论：{clip.filename}')
+    clips, registry = plan_incremental_clips(issue_path.read_text(encoding='utf-8-sig'), previous,
+                                            padding=padding, max_duration=max_duration)
+    samples = stable_samples(source_path.read_text(encoding='utf-8-sig'), clips, previous)
+    if dry_run:
+        return {'planned': [asdict(c) for c in clips + samples]}
+    length = duration(replay)
+    planned = clips + samples
+    if any(c.start >= length or any(to_seconds(t) > length for t in TIMESTAMP_RE.findall(c.timecode)) for c in planned):
+        raise ValueError('回听窗口超出回放时长，请核对清单时间码及原稿是否匹配。')
+    old_by_name = {item['filename']: item for item in previous.get('clips', []) + previous.get('samples', [])}
+    def bounded(clip):
+        old = old_by_name.get(clip.filename)
+        if old:
+            if old['start'] != clip.start or old['duration'] != clip.duration:
+                raise ValueError('旧音频窗口发生变化，不能替换音频后沿用旧签字；请核对失效范围。')
+            return clip
+        return replace(clip, duration=min(clip.duration, length-clip.start))
+    clips = [bounded(c) for c in clips]
+    samples = [bounded(c) for c in samples]
+    planned = clips + samples
+    sheet_text = render_review_sheet(clips, samples) if old_sheet is None else merge_review_sheet(old_sheet, old_clips, old_samples, clips, samples)
+    manifest = {'version': 1, 'review_revision': 2, 'source': replay.relative_to(case_dir).as_posix(),
+                'issues': 'outputs/02_待核问题清单.md', 'source_sha256': replay_hash,
+                'transcript_sha256': transcript_hash, 'issue_registry': registry,
+                'clips': [asdict(c) for c in clips], 'samples': [asdict(c) for c in samples]}
+    (case_dir / '_work').mkdir(parents=True, exist_ok=True)
+    for clip in planned:
+        target = output_dir / clip.filename
+        if (target.exists() or target.is_symlink()) and clip.filename not in old_by_name:
+            raise ValueError(f'新音频文件名已被其他文件占用，保留人工文件，不自动覆盖：{clip.filename}')
+    with tempfile.TemporaryDirectory(prefix='.review-clips-', dir=case_dir/'_work') as directory:
+        staging = Path(directory)
+        for clip in planned:
+            target = staging / clip.filename
+            if target.exists():
+                continue
+            old = old_by_name.get(clip.filename)
+            if old and old['start'] == clip.start and old['duration'] == clip.duration:
+                shutil.copy2(output_dir/clip.filename, target)
+            else:
+                audio_clip(replay, target, clip.start, clip.duration)
+        for item in manifest['clips'] + manifest['samples']:
+            item['audio_sha256'] = file_sha256(staging/item['filename'])
+        changed = previous != manifest or (old_sheet is not None and old_sheet != sheet_text)
+        if changed and previous:
+            archive_previous_package(output_dir, review_sheet)
+        removed = install_staged_package(staging, output_dir, planned, manifest,
+            review_sheet_path=review_sheet, review_sheet_text=sheet_text if old_sheet != sheet_text else None)
+        if changed and (output_dir/'machine_transcripts.json').is_file():
+            # Old derived text remains in the archived package, never masquerades as current.
+            (output_dir/'machine_transcripts.json').unlink()
+    return {'issue_files': len({c.filename for c in clips}), 'issue_references': len(clips),
+            'sample_files': len(samples), 'stale_removed': removed, 'destination': str(output_dir)}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="按待核清单时间码提取短音频，避免人工拖动整场回放。")
     parser.add_argument("case_dir", type=Path)
@@ -335,104 +671,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    case_dir = args.case_dir.resolve()
-    replay = find_replay(case_dir)
-    issue_path = case_dir / "outputs/02_待核问题清单.md"
-    source_path = case_dir / "inputs/02_带时间码原稿.md"
-    output_dir = case_dir / "_work/review_clips"
-    if not replay.is_file() or not issue_path.is_file() or not source_path.is_file():
-        parser.error("任务目录缺少回放、原稿或待核问题清单")
-    avconvert = shutil.which("ffmpeg")
-    if not args.dry_run and not avconvert:
+    if not args.dry_run and not shutil.which("ffmpeg"):
         parser.error("当前系统找不到 ffmpeg；请安装 FFmpeg 后重试")
-
-    clips = share_duplicate_windows(
-        parse_review_clips(
-            issue_path.read_text(encoding="utf-8-sig"),
-            padding=max(0, args.padding),
-            max_duration=max(10, args.max_duration),
-        )
-    )
-    samples = select_stratified_samples(source_path.read_text(encoding="utf-8-sig"), clips)
-    planned = clips + samples
-    if not planned:
-        print("CLIPS=PASS files=0 unresolved_items=0")
+    try:
+        result = extract_review_package(args.case_dir, padding=max(0, args.padding),
+            max_duration=max(10, args.max_duration), refresh_review_sheet=args.refresh_review_sheet, dry_run=args.dry_run)
+        if args.dry_run:
+            print(json.dumps(result['planned'], ensure_ascii=False, indent=2))
+        else:
+            print('CLIPS=PASS ' + ' '.join(f'{key}={value}' for key, value in result.items()))
         return 0
-    if args.dry_run:
-        print(json.dumps([asdict(clip) for clip in planned], ensure_ascii=False, indent=2))
-        return 0
-
-    length = duration(replay)
-    if any(c.start >= length or any(to_seconds(t)>length for t in TIMESTAMP_RE.findall(c.timecode)) for c in planned):
-        parser.error("回听窗口超出回放时长，请核对清单时间码及原稿是否匹配")
-    clips=[replace(c,duration=min(c.duration,length-c.start)) for c in clips]
-    samples=[replace(c,duration=min(c.duration,length-c.start)) for c in samples]
-    planned=clips+samples
-    (case_dir / "_work").mkdir(parents=True, exist_ok=True)
-    review_sheet = case_dir / "_work" / REVIEW_SHEET_NAME
-    desired_filenames = {clip.filename for clip in planned}
-    if review_sheet.exists() and not args.refresh_review_sheet:
-        previous_path=output_dir/'manifest.json'
-        previous=json.loads(previous_path.read_text(encoding='utf-8-sig')) if previous_path.is_file() else {}
-        if previous.get('source_sha256')!=file_sha256(replay) or previous.get('transcript_sha256')!=file_sha256(source_path):
-            parser.error('回放或原稿变化，不能沿用旧回听结论；请先比较并归档旧终审表和片段。')
-        previous_items=previous.get('clips',[])+previous.get('samples',[])
-        fields=('priority','issue_index','timecode','issue_type','issue_text','start','duration','filename')
-        if [{k:x.get(k) for k in fields} for x in previous_items]!=[asdict(c) for c in planned]:
-            parser.error('回听问题或窗口变化，不能沿用旧结论；请先比较并归档旧终审表和片段。')
-        existing_filenames = review_sheet_clip_filenames(
-            review_sheet.read_text(encoding="utf-8-sig")
-        )
-        if existing_filenames != desired_filenames:
-            parser.error(
-                "待核项或抽听点已变化，但现有回听终审表不会被静默覆盖；"
-                "确认表格尚未填写后使用 --refresh-review-sheet，已填写时请先归档旧表。"
-            )
-    manifest = {
-        "version": 1,
-        "source": replay.relative_to(case_dir).as_posix(),
-        "issues": "outputs/02_待核问题清单.md",
-        "source_sha256": file_sha256(replay),
-        "transcript_sha256": file_sha256(source_path),
-        "clips": [asdict(clip) for clip in clips],
-        "samples": [asdict(sample) for sample in samples],
-    }
-    sheet_text = (
-        render_review_sheet(clips, samples)
-        if args.refresh_review_sheet or not review_sheet.exists()
-        else None
-    )
-    staging_parent = case_dir / "_work"
-    with tempfile.TemporaryDirectory(prefix=".review-clips-", dir=staging_parent) as directory:
-        staging_dir = Path(directory)
-        for clip in planned:
-            destination = staging_dir / clip.filename
-            if destination.exists():
-                continue
-            try:
-                audio_clip(replay, destination, clip.start, clip.duration)
-            except subprocess.CalledProcessError as exc:
-                detail = (exc.stderr or "").strip().splitlines()
-                message = detail[-1] if detail else "FFmpeg 未返回错误详情"
-                raise RuntimeError(
-                    f"生成 {clip.filename} 失败；原终审包保持不变：{message}"
-                ) from exc
-        for item in manifest["clips"] + manifest["samples"]:
-            item["audio_sha256"] = file_sha256(staging_dir / item["filename"])
-        removed = install_staged_package(
-            staging_dir,
-            output_dir,
-            planned,
-            manifest,
-            review_sheet_path=review_sheet,
-            review_sheet_text=sheet_text,
-        )
-    print(
-        f"CLIPS=PASS issue_files={len({clip.filename for clip in clips})} "
-        f"issue_references={len(clips)} sample_files={len(samples)} "
-        f"stale_removed={removed} destination={output_dir}"
-    )
-    return 0
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError, subprocess.CalledProcessError) as exc:
+        print('CLIPS=BLOCKED\n' + str(exc), file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

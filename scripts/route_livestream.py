@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 
@@ -18,6 +19,74 @@ SPEAKER_HEADER_RE = re.compile(
     re.MULTILINE | re.IGNORECASE,
 )
 VALID_COUNTS = {"1", "2", "3+", "uncertain"}
+POSITIONS = ['开场', '25%', '50%', '75%', '结尾']
+
+
+def validate_observations(case_dir: Path, observations: object) -> list[dict]:
+    """Validate recorded coverage of real probe windows, not whether listening occurred."""
+    if not isinstance(observations, list) or len(observations) != 5 or not all(isinstance(x, dict) for x in observations):
+        raise ValueError('需要五条结构化核验记录，分别对应开场、25%、50%、75%、结尾。')
+    if {item.get('position') for item in observations} != set(POSITIONS):
+        raise ValueError('五条核验记录必须覆盖五个不同的位置，不能只重复开场。')
+    folder = case_dir/'_work/分流试听'
+    manifest_path = folder/'manifest.json'
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
+        if manifest.get('source_sha256') != file_sha256(find_replay(case_dir)):
+            raise ValueError('分流试听未绑定当前回放，请核对并重新生成。')
+        length = float(manifest.get('source_duration_seconds', 0))
+        if not math.isfinite(length) or length <= 0:
+            raise ValueError('试听记录缺少有效回放时长；旧试听包需按实际素材重新生成。')
+        clips = manifest.get('clips')
+        if not isinstance(clips, list) or len(clips) != 5 or {c.get('position') for c in clips} != set(POSITIONS):
+            raise ValueError('试听清单没有完整的五个位置。')
+        if len({c['file'] for c in clips}) != 5:
+            raise ValueError('素材不足五个独立试听窗口；不要复制片段或补造记录。')
+        if len({(float(c['start_seconds']), float(c['duration_seconds'])) for c in clips}) != 5:
+            raise ValueError('素材不足五个不同时间窗口；不同文件名不能替代独立位置。')
+        indexed = {c['position']:c for c in clips}
+        records = {item['position']:item for item in observations}
+        validated = []
+        for position,fraction in zip(POSITIONS,[0,.25,.5,.75,1]):
+            clip, record = indexed[position], records[position]
+            expected_start = min(max(0, length-20),length*fraction)
+            expected_duration = min(20,length-expected_start)
+            start, span = float(clip['start_seconds']), float(clip['duration_seconds'])
+            if not all(math.isfinite(x) for x in [start,span]) or abs(start-expected_start)>.01 or abs(span-expected_duration)>.01:
+                raise ValueError(f'{position} 的试听窗口不对应回放实际位置。')
+            name = str(clip['file']); path=folder/name
+            if Path(name).name != name or path.is_symlink() or not path.resolve().is_relative_to(folder.resolve()) or not path.is_file() or clip.get('audio_sha256') != file_sha256(path):
+                raise ValueError(f'{position} 的试听文件缺失、越界或已变化。')
+            observed_start, observed_end = float(record['start_seconds']),float(record['end_seconds'])
+            if not all(math.isfinite(x) for x in [observed_start,observed_end]) or abs(observed_start-start)>.01 or abs(observed_end-start-span)>.01:
+                raise ValueError(f'{position} 的核验时间没有对应试听窗口。')
+            method, finding = record.get('method'), record.get('finding')
+            if not isinstance(method,str) or not re.search(r'真人回听|音频理解|回放画面',method) or re.search(r'待填|待确认|原稿标签|转写文本|仅凭上下文|尚未|未进行|未完成|没有(?:进行|完成)|计划|准备|未回听|未核验|未执行',method):
+                raise ValueError(f'{position} 需要实际的回听、音频理解或回放画面核验方式。')
+            if not isinstance(finding,str) or not finding.strip() or re.fullmatch(r'待填(?:写)?|待确认|未知|不确定|填写实际发现',finding.strip()) or re.search(r'听不清|无法(?:判断|确认|确定|辨认|识别)|不能(?:判断|确认|确定|辨认|识别)|人数(?:未知|不确定|待确认)|未(?:能)?确认.*(?:人数|说话人)|uncertain',finding,re.I):
+                raise ValueError(f'{position} 缺少实际发现；无法确认时请记录uncertain，不猜人数。')
+            validated.append({'position':position,'start_seconds':start,'end_seconds':start+span,'method':method.strip(),'finding':finding.strip()})
+        return validated
+    except (OSError, KeyError, TypeError, AttributeError, json.JSONDecodeError) as exc:
+        raise ValueError(f'分流试听或结构化记录缺失/无效：{exc}') from exc
+
+
+def observation_texts(records: list[dict]) -> list[str]:
+    return [f"{r['position']}｜{r['start_seconds']:g}–{r['end_seconds']:g}秒｜{r['method']}｜{r['finding']}" for r in records]
+
+
+def route_position_errors(case: Path, route: dict, *, handoff: bool = False) -> list[str]:
+    if route.get('schema_version') != 2:
+        return ['旧分流记录缺少五位置结构化依据；正式交接前请按真实回放补核并保留旧记录。'] if handoff else []
+    try:
+        records=validate_observations(case,route.get('replay',{}).get('observations'))
+        if route['replay'].get('probe_manifest_sha256') != file_sha256(case/'_work/分流试听/manifest.json'):
+            raise ValueError('分流所绑定的试听清单已变化。')
+        if route['replay'].get('evidence') != observation_texts(records):
+            raise ValueError('分流文字与五位置核验记录不一致。')
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        return [str(exc)]
+    return []
 
 
 def valid_default_map(mapping: object, speaker_ids: set[str], labels: set[str] | None = None) -> bool:
@@ -59,6 +128,7 @@ def build_route(
     *,
     acoustic_speakers: str,
     evidence: list[str],
+    observations: list[dict] | None = None,
 ) -> dict[str, object]:
     case_dir = case_dir.resolve()
     if acoustic_speakers not in VALID_COUNTS:
@@ -74,8 +144,12 @@ def build_route(
     if acoustic_speakers in {"1", "2"} and not matches:
         raise ValueError("原稿没有可识别的发言人时间块；先保留原稿并转换格式，不能继续正文整理。")
 
-    if acoustic_speakers in {"1", "2"} and len({item.strip() for item in evidence if item.strip()}) < 5:
-        raise ValueError("单人/双人分流至少需要开场、25%、50%、75%和结尾五条回放证据。")
+    validated = []
+    if acoustic_speakers in {"1", "2"}:
+        if observations is None:
+            raise ValueError('单人/双人需要五位置结构化核验记录；先运行probe，再使用 --observations，不能用五条不同文字代替。')
+        validated=validate_observations(case_dir,observations)
+        evidence=observation_texts(validated)
     if acoustic_speakers in {"3+", "uncertain"} and not evidence:
         raise ValueError("阻断分流也必须记录至少一条回放证据。")
 
@@ -94,8 +168,8 @@ def build_route(
     else:
         mode, status, target = "unsupported", "BLOCKED", None
 
-    return {
-        "schema_version": 1,
+    result = {
+        "schema_version": 2 if validated else 1,
         "status": status,
         "mode": mode,
         "acoustic_speaker_count": acoustic_speakers,
@@ -115,6 +189,10 @@ def build_route(
         },
         "warnings": warnings,
     }
+    if validated:
+        result['replay']['observations']=validated
+        result['replay']['probe_manifest_sha256']=file_sha256(case_dir/'_work/分流试听/manifest.json')
+    return result
 
 
 def write_route(case_dir: Path, route: dict[str, object]) -> Path:
@@ -142,14 +220,16 @@ def main() -> int:
         "--evidence",
         action="append",
         default=[],
-        help="回放核验记录，至少包含时间范围和判断；可重复。",
+        help="仅用于3+/uncertain的阻断说明，可重复。正常分流用--observations。",
     )
+    parser.add_argument('--observations',type=Path,help='五位置结构化核验JSON；Agent按probe实际片段填写，不能代填未发生的回听。')
     args = parser.parse_args()
     try:
         route = build_route(
             args.case_dir,
             acoustic_speakers=args.acoustic_speakers,
             evidence=args.evidence,
+            observations=json.loads(args.observations.read_text(encoding='utf-8-sig')) if args.observations else None,
         )
         output = write_route(args.case_dir, route)
     except (FileExistsError, FileNotFoundError, ValueError) as exc:
