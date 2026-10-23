@@ -20,7 +20,7 @@
 | 首次试用 | 提供普通语言的试用记录，分开安装、AI 等待和人工用时；尚未填成真人体验已通过 |
 | 阅读入口 | 双人/单人链接、缺失音频、输入变化、人工改过入口的保护共四项回归通过 |
 | 分发 | 单一 SKILL.md；白名单、账号/密钥拒绝、包内逐文件哈希和可重复打包检查通过 |
-| 持续集成 | 已配置三种系统和 Python 3.10/3.12 六项技术检查；远端实际结果见 [Actions](https://github.com/Z-DB/livestream-editor/actions) |
+| 持续集成 | 已配置三种系统和 Python 3.10/3.12 六项技术检查；远端实际结果见 [Actions](https://github.com/Jianxmm/livestream-editor/actions) |
 
 基础工具实测环境为 macOS arm64、Python 3.14.7、FFmpeg 9.0.1。声学后端单独使用 Python 3.12，未修改系统 Python。基础脚本最低版本为 Python 3.10，已在三种系统的 CI 中通过回归和合成音频检查；客户端实机体验另行验收。
 

@@ -44,4 +44,4 @@ AI 软件和版本：
 
 ## 反馈时不用交出整场内容
 
-可以把上面的记录和一两处去除个人信息的片段发到 [使用问题](https://github.com/Z-DB/livestream-editor/issues/new?template=usage-help.md)。不要贴完整直播、私人词库或未经同意的稿件。维护者应分别记录 Codex、WorkBuddy 的单人和双人结果；其中一种用过，不代表另外几种已经验证。
+可以把上面的记录和一两处去除个人信息的片段发到 [使用问题](https://github.com/Jianxmm/livestream-editor/issues/new?template=usage-help.md)。不要贴完整直播、私人词库或未经同意的稿件。维护者应分别记录 Codex、WorkBuddy 的单人和双人结果；其中一种用过，不代表另外几种已经验证。

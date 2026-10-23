@@ -6,7 +6,7 @@
 
 适合整理一个人的课程、经验分享，也适合两个人的访谈对话。正常使用不需要自己写代码。
 
-[下载安装包](https://github.com/Z-DB/livestream-editor/releases/download/v0.4.0/livestream-editor-0.4.0.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
+[下载安装包](https://github.com/Jianxmm/livestream-editor/releases/download/v0.4.0/livestream-editor-0.4.0.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
 
 ## 先看看它能帮你做什么
 
@@ -75,6 +75,6 @@ AI 会使用随包提供的模板协助填写，不需要自己改 Skill。没�
 
 ## 遇到问题怎么反馈
 
-可以 [提交使用问题](https://github.com/Z-DB/livestream-editor/issues/new?template=usage-help.md)，写清“使用的 AI 软件、做到哪一步、看到什么提示、原本想得到什么”。提交反馈需要 GitHub 账号，下载安装不需要。请不要上传完整直播或私密稿件。
+可以 [提交使用问题](https://github.com/Jianxmm/livestream-editor/issues/new?template=usage-help.md)，写清“使用的 AI 软件、做到哪一步、看到什么提示、原本想得到什么”。提交反馈需要 GitHub 账号，下载安装不需要。请不要上传完整直播或私密稿件。
 
 [第一次试用怎样检查](TRYOUT.md) · [更完整的安装与操作说明](TECHNICAL.md) · [已经测过哪些情况](VALIDATION.md) · [更新记录](CHANGELOG.md) · [许可](LICENSE)
