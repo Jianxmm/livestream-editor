@@ -81,10 +81,14 @@ def smoke() -> dict:
             for _ in range(30):w.writeframes(one)
         source=root/'原稿.md';source.write_text('发言人1   00:00\n这是技术样例，不代表真实讲话。\n\n发言人1   00:10\n核验输入复制和索引定位。\n',encoding='utf-8')
         subtitle=root/'原字幕.srt'
-        subtitle.write_bytes('1\r\n00:00:00,120 --> 00:00:09,800\r\n字幕技术样例，不是真实讲话。\r\n\r\n2\r\n00:00:10,900 --> 00:00:29,000\r\n保留原字幕和准确时间。\r\n'.encode('utf-8-sig'))
+        subtitle.write_bytes('1\r\n00:00:00,120 --> 00:00:00,600\r\n字幕技术样例，\r\n\r\n2\r\n00:00:00,700 --> 00:00:09,800\r\n不是真实讲话。\r\n\r\n3\r\n00:00:10,900 --> 00:00:29,000\r\n保留原字幕和准确时间。\r\n'.encode('utf-8-sig'))
         subtitle_case=init_case(root/'字幕导入样例',media,subtitle)
         assert doctor(subtitle_case)['status']=='READY'
         assert file_sha256(subtitle)==file_sha256(subtitle_case/'inputs/05_平台原始导出.srt')
+        imported=json.loads((subtitle_case/'_work/字幕导入记录.json').read_text(encoding='utf-8'))
+        assert imported['cue_count']==3 and imported['grouped_block_count']==1
+        assert imported['blocks'][0]['cue_numbers']==[1,2]
+        assert '字幕技术样例，\n不是真实讲话。' in (subtitle_case/'inputs/02_带时间码原稿.md').read_text(encoding='utf-8')
         case=init_case(root/'2026-01-01-技术样例',media,source)
         before=file_sha256(case/'inputs/02_带时间码原稿.md')
         result=extract_full_audio(case)

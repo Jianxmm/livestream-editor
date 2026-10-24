@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import subprocess
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
@@ -56,12 +57,143 @@ class SubtitleTests(unittest.TestCase):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 convert_subtitles(data.encode(), kind)
 
-    def test_overlap_rolling_and_same_second_cannot_be_silently_merged(self):
-        for second in [('00:00:01,500', '00:00:03,000'), ('00:00:00,800', '00:00:01,000')]:
+    def test_overlap_rolling_or_reverse_timing_cannot_be_silently_merged(self):
+        for second in [('00:00:01,500', '00:00:03,000'), ('00:00:00,050', '00:00:01,000')]:
             end = '00:00:02,000' if second[0].endswith('500') else '00:00:00,700'
             data = f'1\n00:00:00,100 --> {end}\n甲\n\n2\n{second[0]} --> {second[1]}\n乙'
             with self.subTest(second=second), self.assertRaises(ValueError):
                 convert_subtitles(data.encode(), 'srt')
+
+    def test_same_second_unknown_cues_keep_every_word_and_exact_boundary(self):
+        data = ('1\n00:00:00,120 --> 00:00:00,400\n不是十万，\n\n'
+                '2\n00:00:00,450 --> 00:00:00,700\n是三万。\n\n'
+                '3\n00:00:00,700 --> 00:00:01,100\n保留限定。\n\n'
+                '4\n00:00:01,200 --> 00:00:02,000\n下一句。')
+        text, record = convert_subtitles(data.encode(), 'srt')
+        self.assertEqual(text.count('发言人未标注   00:00:00'), 1)
+        self.assertIn('不是十万，\n是三万。\n保留限定。', text)
+        self.assertEqual(record['cue_count'], 4)
+        self.assertEqual([c['start_ms'] for c in record['cues']], [120, 450, 700, 1200])
+        self.assertEqual([c['end_ms'] for c in record['cues']], [400, 700, 1100, 2000])
+        self.assertEqual(record['blocks'][0]['cue_numbers'], [1, 2, 3])
+        self.assertEqual(record['blocks'][1]['cue_numbers'], [4])
+        self.assertEqual(record['grouped_block_count'], 1)
+        self.assertEqual([c['block_number'] for c in record['cues']], [1, 1, 1, 2])
+
+    def test_same_second_matching_voice_keeps_original_voice_and_cue_mapping(self):
+        data = ('WEBVTT\n\n00:00.100 --> 00:00.300\n<v 甲>前提。\n\n'
+                '00:00.400 --> 00:01.000\n<v 甲>例外。')
+        text, record = convert_subtitles(data.encode(), 'vtt')
+        self.assertIn('发言人1   00:00:00\n前提。\n例外。', text)
+        self.assertEqual(record['voice_labels'], {'甲': '发言人1'})
+        self.assertEqual([c['original_voice'] for c in record['cues']], ['甲', '甲'])
+        self.assertIn('未核验', record['speaker_status'])
+
+    def test_same_second_different_voice_labels_are_rejected_with_location(self):
+        data = ('WEBVTT\n\n00:00.100 --> 00:00.300\n<v 甲>提问。\n\n'
+                '00:00.400 --> 00:01.000\n<v 乙>回答。')
+        with self.assertRaisesRegex(ValueError, '第 2 条.*声音标签'):
+            convert_subtitles(data.encode(), 'vtt')
+
+    def test_same_second_known_and_unknown_voices_cannot_be_grouped(self):
+        data = ('WEBVTT\n\n00:00.100 --> 00:00.300\n<v 甲>提问。\n\n'
+                '00:00.400 --> 00:01.000\n未标注回答。')
+        with self.assertRaisesRegex(ValueError, '第 2 条.*声音标签'):
+            convert_subtitles(data.encode(), 'vtt')
+
+    def test_grouped_unknown_cues_do_not_hide_a_real_speaker_change(self):
+        data = ('1\n00:00:00,100 --> 00:00:00,300\n提问。\n\n'
+                '2\n00:00:00,400 --> 00:00:00,900\n回答。')
+        text, _ = convert_subtitles(data.encode(), 'srt')
+        segments = [{'id': 'a', 'start_seconds': 0, 'end_seconds': .35, 'speaker_id': 'A'},
+                    {'id': 'b', 'start_seconds': .35, 'end_seconds': 1, 'speaker_id': 'B'}]
+        blocks, conflicts = align_blocks(text, segments, {'发言人未标注': None}, 1)
+        self.assertEqual(blocks[0]['status'], '混合说话人')
+        self.assertIsNone(blocks[0]['resolved_speaker_id'])
+        self.assertEqual(len(conflicts), 1)
+
+    def test_grouped_init_preserves_raw_bytes_and_protects_mapping(self):
+        with tempfile.TemporaryDirectory(prefix='同秒字幕 ') as directory:
+            root = Path(directory)
+            media = root / '音频.wav'; media.write_bytes(b'synthetic media')
+            data = ('1\r\n00:00:00,100 --> 00:00:00,300\r\n原话一。\r\n\r\n'
+                    '2\r\n00:00:00,400 --> 00:00:01,000\r\n原话二。\r\n').encode('utf-8-sig')
+            source = root / '原字幕.srt'; source.write_bytes(data)
+            case = init_case(root / 'case', media, source)
+            self.assertEqual(source.read_bytes(), data)
+            self.assertEqual((case / 'inputs/05_平台原始导出.srt').read_bytes(), data)
+            with patch('workspace.duration', return_value=2):
+                result = inspect_case(case)
+            self.assertEqual(result['errors'], [])
+            self.assertTrue(any('同秒' in warning for warning in result['warnings']))
+            record_path = case / '_work/字幕导入记录.json'
+            record = json.loads(record_path.read_text(encoding='utf-8'))
+            self.assertEqual(record['blocks'][0]['cue_numbers'], [1, 2])
+            record['blocks'][0]['cue_numbers'] = [1]
+            record_path.write_text(json.dumps(record), encoding='utf-8')
+            self.assertTrue(any('字幕导入记录' in e for e in input_manifest_errors(case)))
+
+    def test_full_transcript_overlap_is_explicit_and_preserves_duplicate_cues(self):
+        data = ('1\n00:00:00,100 --> 00:00:01,100\n原话。\n\n'
+                '2\n00:00:01,000 --> 00:00:01,100\n短句。\n\n'
+                '3\n00:00:01,000 --> 00:00:01,100\n短句。')
+        with self.assertRaisesRegex(ValueError, '重叠'):
+            convert_subtitles(data.encode(), 'srt')
+        text, record = convert_subtitles(data.encode(), 'srt', source_kind='full-transcript')
+        self.assertEqual(text.count('短句。'), 2)
+        self.assertEqual(record['source_kind'], 'full-transcript')
+        self.assertEqual([c['start_ms'] for c in record['cues']], [100, 1000, 1000])
+        self.assertEqual([x['overlap_ms'] for x in record['timing_overlaps']], [100, 100])
+        self.assertEqual(record['blocks'][1]['cue_numbers'], [2, 3])
+
+    def test_full_transcript_still_rejects_reversed_starts(self):
+        data = ('1\n00:00:02,100 --> 00:00:03,000\n先句。\n\n'
+                '2\n00:00:02,000 --> 00:00:03,000\n倒序句。')
+        with self.assertRaisesRegex(ValueError, '倒序'):
+            convert_subtitles(data.encode(), 'srt', source_kind='full-transcript')
+
+    def test_full_transcript_cannot_hide_voice_change_at_same_second(self):
+        data = ('WEBVTT\n\n00:00.100 --> 00:00.700\n<v 甲>提问。\n\n'
+                '00:00.600 --> 00:01.000\n<v 乙>回答。')
+        with self.assertRaisesRegex(ValueError, '声音标签'):
+            convert_subtitles(data.encode(), 'vtt', source_kind='full-transcript')
+
+    def test_unknown_source_kind_is_not_a_silent_overlap_override(self):
+        with self.assertRaisesRegex(ValueError, '来源'):
+            convert_subtitles(SRT.encode(), 'srt', source_kind='unknown')
+
+    def test_full_transcript_option_reaches_cli_and_doctor(self):
+        with tempfile.TemporaryDirectory(prefix='完整转写 ') as directory:
+            root = Path(directory)
+            media = root / '音频.wav'; media.write_bytes(b'synthetic media')
+            source = root / '原字幕.srt'
+            source.write_text('1\n00:00:00,100 --> 00:00:01,100\n前句。\n\n'
+                              '2\n00:00:01,000 --> 00:00:02,000\n后句。', encoding='utf-8')
+            case = root / 'case'
+            result = subprocess.run([sys.executable,
+                str(Path(__file__).resolve().parents[1] / 'scripts/livestream.py'),
+                'init', '--case', str(case), '--replay', str(media), '--transcript', str(source),
+                '--subtitle-source', 'full-transcript'], capture_output=True, text=True, encoding='utf-8')
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            record = json.loads((case / '_work/字幕导入记录.json').read_text(encoding='utf-8'))
+            self.assertEqual(record['source_kind'], 'full-transcript')
+            self.assertEqual(record['timing_overlaps'][0]['overlap_ms'], 100)
+            with patch('workspace.duration', return_value=3):
+                inspection = inspect_case(case)
+            self.assertEqual(inspection['errors'], [])
+            self.assertTrue(any('重叠' in w for w in inspection['warnings']))
+
+    def test_nested_overlap_cannot_hide_an_earlier_end_beyond_media(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            media = root / '音频.wav'; media.write_bytes(b'synthetic media')
+            source = root / '原字幕.srt'
+            source.write_text('1\n00:00:00,100 --> 00:01:00,000\n长时间条目。\n\n'
+                              '2\n00:00:01,000 --> 00:00:02,000\n嵌套短条目。', encoding='utf-8')
+            case = init_case(root / 'case', media, source, subtitle_source='full-transcript')
+            with patch('workspace.duration', return_value=10):
+                self.assertTrue(any('结束时间' in e for e in inspect_case(case)['errors']))
+                self.assertTrue(any('结束时间' in e for e in shared_errors(case)[1]))
 
     def test_multivoice_ruby_or_transcript_injection_rejected(self):
         for payload in ['<v 甲>甲<v 乙>乙', '甲<v 乙>乙', '<v 甲>甲</v>乙', '<ruby>字<rt>zi</rt></ruby>', '发言人2   00:10\n另一个时间行']:

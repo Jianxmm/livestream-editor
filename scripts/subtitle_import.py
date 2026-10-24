@@ -31,9 +31,11 @@ def timecode(value: int) -> str:
     return f'{seconds // 3600:02d}:{seconds // 60 % 60:02d}:{seconds % 60:02d}'
 
 
-def convert_subtitles(data: bytes, kind: str) -> tuple[str, dict]:
+def convert_subtitles(data: bytes, kind: str, *, source_kind: str = 'captions') -> tuple[str, dict]:
     if kind not in {'srt', 'vtt'}:
         raise ValueError('只支持 SRT 或 VTT 字幕导入')
+    if source_kind not in {'captions', 'full-transcript'}:
+        raise ValueError('字幕来源只支持 captions 或 full-transcript')
     encoding = 'utf-16' if data.startswith((b'\xff\xfe', b'\xfe\xff')) else 'utf-8-sig'
     try:
         text = data.decode(encoding).replace('\r\n', '\n').replace('\r', '\n').strip()
@@ -50,7 +52,8 @@ def convert_subtitles(data: bytes, kind: str) -> tuple[str, dict]:
         if any('X-TIMESTAMP-MAP' in line.upper() or '-->' in line for line in header):
             raise ValueError('VTT 含分段时间映射或文件头缺少空行；请导出与完整回放对齐的字幕。')
         metadata.append('\n'.join(header))
-    cues, voices, normalized = [], {}, []
+    cues, voices, blocks, normalized, overlaps = [], {}, [], [], []
+    latest_end, latest_end_cue = 0, 0
     for block in chunks:
         lines = block.splitlines()
         if kind == 'vtt' and (lines[0] in {'STYLE', 'REGION', 'NOTE'} or lines[0].startswith(('NOTE ', 'NOTE\t'))):
@@ -66,10 +69,14 @@ def convert_subtitles(data: bytes, kind: str) -> tuple[str, dict]:
         number = len(cues) + 1
         if end <= start:
             raise ValueError(f'第 {number} 条字幕结束时间必须晚于开始时间')
-        if cues and start < cues[-1]['end_ms']:
-            raise ValueError(f'第 {number} 条字幕重叠或倒序，可能是滚动字幕；请导出不重叠的完整转写稿。')
-        if cues and start // 1000 <= cues[-1]['start_ms'] // 1000:
-            raise ValueError(f'第 {number} 条字幕与前条落在同一秒；当前原稿索引精确到秒，请另导出较长的字幕段。不会移动时间或合并原话。')
+        if cues and start < cues[-1]['start_ms']:
+            raise ValueError(f'第 {number} 条字幕起点倒序；保留原文件核对，不自动重排。')
+        if cues and start < latest_end:
+            if source_kind != 'full-transcript':
+                raise ValueError(f'第 {number} 条字幕重叠，可能是滚动字幕；请导出不重叠的完整转写稿。已知为完整逐段转写时可使用 --subtitle-source full-transcript 保留重叠记录，不能用它绕过滚动字幕限制。')
+            overlaps.append({'cue_number': number, 'previous_cue_number': latest_end_cue,
+                             'start_ms': start, 'end_ms': end, 'overlap_ms': latest_end - start,
+                             'normalized_time': timecode(start)})
         raw = '\n'.join(lines[offset + 1:])
         if not raw.strip():
             raise ValueError(f'第 {number} 条字幕没有文字')
@@ -95,15 +102,39 @@ def convert_subtitles(data: bytes, kind: str) -> tuple[str, dict]:
         if re.search(r'^发言人\S*\s+(?:\d{1,2}:)?\d{2}:\d{2}\s*$', clean, re.M):
             raise ValueError(f'第 {number} 条字幕正文疑似含另一份转写时间行，请核对原始导出。')
         stamp = timecode(start)
+        same_second = bool(blocks and stamp == blocks[-1]['normalized_time'])
+        if same_second and label != blocks[-1]['label']:
+            raise ValueError(f'第 {number} 条字幕与前条落在同一秒但声音标签不同；不能合成一个署名块。请提供保留毫秒与声音边界的转写供核对，不移动时间或猜署名。')
+        if same_second:
+            blocks[-1]['cue_numbers'].append(number)
+            blocks[-1]['end_ms'] = max(blocks[-1]['end_ms'], end)
+        else:
+            blocks.append({'number': len(blocks) + 1, 'normalized_time': stamp,
+                           'start_ms': start, 'end_ms': end, 'label': label,
+                           'cue_numbers': [number]})
         cues.append({'number': number, 'identifier': identifier, 'start_ms': start, 'end_ms': end,
                      'settings': match.group(3) or '', 'original_voice': voice,
-                     'label': label, 'normalized_time': stamp, 'raw_text': raw, 'text': clean})
-        normalized.append(f'{label}   {stamp}\n{clean}\n')
+                     'label': label, 'normalized_time': stamp, 'raw_text': raw, 'text': clean,
+                     'block_number': blocks[-1]['number']})
+        if end > latest_end:
+            latest_end, latest_end_cue = end, number
     if not cues:
         raise ValueError('字幕没有可导入的文字条目')
-    result = {'version': 1, 'format': kind, 'encoding': encoding, 'cue_count': len(cues),
+    for block in blocks:
+        # Grouping is a seconds-index adapter, not a speaker or sentence decision.
+        # Each cue stays on its own line and retains its exact millisecond range.
+        payload = '\n'.join(cues[n - 1]['text'] for n in block['cue_numbers'])
+        normalized.append(f"{block['label']}   {block['normalized_time']}\n{payload}\n")
+    grouped_count = sum(len(block['cue_numbers']) > 1 for block in blocks)
+    result = {'version': 2, 'format': kind, 'source_kind': source_kind,
+              'encoding': encoding, 'cue_count': len(cues),
               'speaker_status': '未核验；字幕标签不证明真实身份或说话人数',
               'voice_labels': voices, 'metadata_blocks': metadata, 'cues': cues,
-              'time_policy': '原始毫秒时间完整保留；规范副本起点向下取整到秒，误差小于1秒；不合并、不删字、不去重'}
+              'blocks': blocks, 'grouped_block_count': grouped_count, 'timing_overlaps': overlaps,
+              'time_policy': '原始毫秒时间完整保留；规范副本起点向下取整到秒，误差小于1秒；同秒且标签相同的条目按原顺序逐行放入一个索引块，保留逐条映射；不删字、不去重、不推断身份，同块不代表同一人'}
     preamble = '<!-- 字幕导入副本：说话人未核验；原始文件及毫秒时间见输入与字幕导入记录。 -->\n\n'
+    if grouped_count:
+        preamble += '<!-- 同秒字幕按原顺序逐行归入时间块，同块不代表同一人；精确分界见字幕导入记录，按回放核验。 -->\n\n'
+    if overlaps:
+        preamble += '<!-- 完整转写稿存在时间重叠，原话与重叠时间均保留，未去重或修正；位置见字幕导入记录，需回放核对。 -->\n\n'
     return preamble + '\n'.join(normalized), result

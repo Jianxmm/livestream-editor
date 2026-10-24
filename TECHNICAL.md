@@ -41,9 +41,11 @@ python3 "<Skill目录>/scripts/livestream.py" setup-speakers
 
 三份正文/检查文件完成后运行 `python3 "<Skill目录>/scripts/livestream.py" reading-index "<场次>"`，生成 `outputs/00_从这里开始.md`。此页只提供阅读链接，不代表已经人工核对或可以发送。
 
-原稿使用 UTF-8，格式见 [样例](examples/带时间码原稿.md)。规范输入是独立的“发言人1   00:00”时间码行；`init --transcript "字幕.srt"` 或 `"字幕.vtt"` 也可直接导入常见完整字幕。支持 UTF-8/BOM、UTF-16 BOM、普通样式和 VTT 单声音标签；原始文件逐字节保存到 `inputs/05_平台原始导出.srt` 或 `.vtt`，规范副本放在原稿位置，`_work/字幕导入记录.json` 保留每条原文、原始毫秒、声音标签与映射。规范副本起点向下取整到秒，误差小于 1 秒；不合并、去重或推断说话人。未提供声音标签的条目写为“发言人未标注”，须由回放核验。
+原稿使用 UTF-8，格式见 [样例](examples/带时间码原稿.md)。规范输入是独立的“发言人1   00:00”时间码行；`init --transcript "字幕.srt"` 或 `"字幕.vtt"` 也可直接导入常见完整字幕。支持 UTF-8/BOM、UTF-16 BOM、普通样式和 VTT 单声音标签；原始文件逐字节保存到 `inputs/05_平台原始导出.srt` 或 `.vtt`，规范副本放在原稿位置，`_work/字幕导入记录.json` 保留每条原文、原始毫秒、声音标签与映射。规范副本起点向下取整到秒，误差小于 1 秒。同一秒内互不重叠且标签相同（包括均未标注）的字幕，按原顺序逐条换行放进一个时间索引块；转换记录中的 `cues` 保留每条边界，`blocks` 记录该块包含哪些条目。该分组不合并句意、不删字或去重，也不证明是同一人。未提供声音标签的条目仍为“发言人未标注”，须由回放核验；一个块实际跨人时按说话人冲突流程处理。
 
-重叠/滚动字幕、同一秒多条、单块多声音、注音及 `X-TIMESTAMP-MAP` 分段字幕会明确报错；请从原工具另导出较长、互不重叠且与完整回放对齐的转写段，不让 AI 临时猜测或移动时间。随后运行 `doctor --case "<场次>"` 检查回放范围；原字幕、规范副本和转换记录发生变化均会阻断统一审计。格式依据：[SubRip 描述](https://www.loc.gov/preservation/digital/formats/fdd/fdd000569.shtml)、[W3C WebVTT](https://www.w3.org/TR/webvtt1/)。
+重叠/滚动字幕、同秒条目的声音标签不同、单条字幕内混合多个声音、注音及 `X-TIMESTAMP-MAP` 分段字幕会明确报错。同秒声音标签不同的情况不能强行并成一个署名块，应保留毫秒与声音边界供核对；其他不支持格式请从原工具另导出互不重叠且与完整回放对齐的转写，不让 AI 临时猜测、删短句或移动时间。随后运行 `doctor --case "<场次>"` 检查回放范围和同秒分组提示；原字幕、规范副本和转换记录发生变化均会阻断统一审计。格式依据：[SubRip 描述](https://www.loc.gov/preservation/digital/formats/fdd/fdd000569.shtml)、[W3C WebVTT](https://www.w3.org/TR/webvtt1/)。
+
+如果已知字幕是转写工具导出的完整逐段原话，例如本地 Whisper 输出，而非滚动字幕，导入时可加 `--subtitle-source full-transcript`。这会原样保留起点有序的重叠条目和重复文字，不自动修正时间或去重；`timing_overlaps` 记录每处精确位置，doctor 会列出需回放核对的时间码。AI 应把这些位置加入待核清单，核对原话与声音边界。来源不明时保持默认模式，不能仅为消除报错选择该选项；起点倒序、同秒声音标签不同等仍拒绝。已有场次不会重新转换或自动迁移。
 
 主稿、待核清单、质检报告放在场次的 `outputs/`，证据与回听材料放在 `_work/`。单人还会提供整场 M4A。单人主稿内部保留兼容文件名 `01_公众号可发布稿.md`，人工终审通过后的发送副本为 `01_学员学习分享稿.md`。
 
@@ -61,12 +63,12 @@ Obsidian 不必安装。导出到其他目录使用 `export`；正文及所引�
 
 ## 验证范围与更新
 
-这是 0.4.0 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
+这是 0.4.1 公开试用版。技术测试与已知限制见 [VALIDATION.md](VALIDATION.md)；不能据安装成功宣称长场次编辑质量或所有客户端兼容。
 
 更新时下载新版并解压，在新版目录运行 `python3 install.py --upgrade`（Windows 用 `py -3 install.py --upgrade`）。旧安装目录，包括人工修改和额外文件，会完整移到 `~/.agents/skill-backups/`，再安装新版；激活失败会恢复旧版。可用 `--backup-dir` 指定技能扫描目录之外的备份位置。普通安装遇到不同版本仍会停止，完全相同的版本可以重复运行。
 
 案例和模型应放在安装目录之外，更新时无需搬动。不要把旧版备份放回技能扫描目录或同时启用来处理同一场素材。
 
-维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.4.0.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
+维护者仅从本目录构建发布包：`python3 scripts/livestream.py package --output "<安装目录之外>/livestream-editor-0.4.1.zip"`。白名单由 `release-files.json` 管理，真实案例、缓存、模型及密钥不进入包。完整源码可作为独立 GitHub 仓库内容；本仓库父目录内的私人材料不属于本包。具体步骤见 [PUBLISHING.md](PUBLISHING.md)。
 
 代码与原创规则采用 [MIT](LICENSE)。外部模型和工具分别遵守其原许可，见 [THIRD_PARTY.md](THIRD_PARTY.md)。

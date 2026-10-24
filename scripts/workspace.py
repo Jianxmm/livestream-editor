@@ -42,7 +42,7 @@ def source_timing(text: str) -> tuple[list[int], list[str]]:
 
 
 def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = None,
-              profile: Path | None = None) -> Path:
+              profile: Path | None = None, *, subtitle_source: str = 'captions') -> Path:
     case = case.expanduser().resolve()
     outside_install(case)
     if case.exists():
@@ -56,8 +56,10 @@ def init_case(case: Path, replay: Path, transcript: Path, people: Path | None = 
     if transcript.suffix.lower() in {'.srt', '.vtt'}:
         raw_subtitles = transcript.read_bytes()
         subtitle_source_hash = hashlib.sha256(raw_subtitles).hexdigest()
-        text, imported = convert_subtitles(raw_subtitles, transcript.suffix.lower()[1:])
+        text, imported = convert_subtitles(raw_subtitles, transcript.suffix.lower()[1:], source_kind=subtitle_source)
     else:
+        if subtitle_source != 'captions':
+            raise ValueError('--subtitle-source 仅适用于 SRT/VTT，不能改变普通原稿的校验规则')
         text = transcript.read_text(encoding='utf-8-sig')
     if not SPEAKER_HEADER_RE.search(text):
         raise ValueError('可直接提供 SRT/VTT 字幕，或使用“发言人1   00:00”格式的转写稿。保留原文件，不从摘要扩写。')
@@ -142,7 +144,7 @@ def subtitle_timing_errors(case: Path, length: float | None = None) -> list[str]
         imported = json.loads(record.read_text(encoding='utf-8'))
         if length is None:
             length = duration(find_replay(case))
-        if imported['cues'][-1]['end_ms'] / 1000 > length + 2:
+        if max(cue['end_ms'] for cue in imported['cues']) / 1000 > length + 2:
             return ['字幕结束时间超出回放时长，请核对是否为同一场或有剪辑偏移']
     except (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
         return [f'字幕时间与回放无法核对：{exc}']
@@ -172,6 +174,12 @@ def inspect_case(case: Path) -> dict:
         if subtitle_manifest.is_file():
             errors.extend(subtitle_timing_errors(case, length))
             warnings.append('字幕声音标签均未核验；“未标注”不是单人结论，需要对照回放')
+            imported = json.loads(subtitle_manifest.read_text(encoding='utf-8'))
+            if imported.get('grouped_block_count'):
+                warnings.append('同秒字幕已按原顺序逐行归入时间块，精确毫秒及逐条映射见字幕导入记录；同块不代表同一人，必须核对声音边界')
+            if imported.get('timing_overlaps'):
+                positions = '、'.join(dict.fromkeys(row['normalized_time'] for row in imported['timing_overlaps']))
+                warnings.append(f'完整转写稿保留了时间重叠，未去重或修改时间；需回放核对内容和边界：{positions}。逐条记录见字幕导入记录')
     except (OSError, ValueError, KeyError, TypeError, IndexError, RuntimeError) as exc:
         errors.append(str(exc))
     return {'errors': errors, 'warnings': warnings}
@@ -457,6 +465,8 @@ def main() -> int:
     for flag in ['case', 'replay', 'transcript']: p.add_argument('--'+flag, type=Path, required=True)
     p.add_argument('--people', type=Path)
     p.add_argument('--profile', type=Path, help='可选的个人词库、参考案例与偏好目录')
+    p.add_argument('--subtitle-source', choices=['captions', 'full-transcript'], default='captions',
+                   help='SRT/VTT 来源；仅已知为完整逐段转写时选 full-transcript，原样保留重叠与重复条目供核对')
     p = sub.add_parser('templates'); p.add_argument('case', type=Path); p.add_argument('--mode', choices=['solo','dual'], required=True)
     p = sub.add_parser('probe'); p.add_argument('case', type=Path)
     p = sub.add_parser('export'); p.add_argument('case', type=Path); p.add_argument('destination', type=Path)
@@ -464,7 +474,7 @@ def main() -> int:
     try:
         if args.command == 'doctor':
             data = doctor(args.case); print(json.dumps(data, ensure_ascii=False, indent=2)); return 0 if data['status']=='READY' else 1
-        if args.command == 'init': print(init_case(args.case,args.replay,args.transcript,args.people,args.profile))
+        if args.command == 'init': print(init_case(args.case,args.replay,args.transcript,args.people,args.profile,subtitle_source=args.subtitle_source))
         if args.command == 'templates': print(json.dumps(templates(args.case.resolve(),args.mode),ensure_ascii=False))
         if args.command == 'probe': print(probe(args.case.resolve()))
         if args.command == 'export': print(export_outputs(args.case,args.destination))

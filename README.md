@@ -1,12 +1,12 @@
 # 直播文稿整理
 
-**把直播视频或录音，整理成一篇读得顺、尽量保留原话的文字稿。**
+**把直播回放和已有的转写稿，整理成读得顺、尽量保留原话的文字稿。**
 
 将直播回放和带时间的转写稿，整理成便于阅读的文字稿。保留原来的意思、例子和问答，调整分段、标点和多余的口头词；听不清或拿不准的地方单独列出，方便回听确认。
 
 适合整理一个人的课程、经验分享，也适合两个人的访谈对话。正常使用不需要自己写代码。
 
-[下载安装包](https://github.com/Jianxmm/livestream-editor/releases/download/v0.4.0/livestream-editor-0.4.0.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
+[下载安装包](https://github.com/Jianxmm/livestream-editor/releases/download/v0.4.1/livestream-editor-0.4.1.zip) · [第一次使用，按这里操作](START_HERE.md) · [看看整理前后的区别](examples/整理前后对比.md)
 
 ## 先看看它能帮你做什么
 
