@@ -1,0 +1,4 @@
+interface:
+  display_name: "直播文稿整理"
+  short_description: "把直播整理成保留原话的文字稿，支持自己的词库和参考稿，疑点单独列出"
+  default_prompt: "使用 $livestream-editor 整理这场直播，有个人资料时一并参考，保留原话和例子，拿不准的地方单独列出来让我确认。"

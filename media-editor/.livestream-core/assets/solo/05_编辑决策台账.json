@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "source": "inputs/02_带时间码原稿.md",
+  "content_type": "单人分享",
+  "acoustic_speaker_count": 1,
+  "nontrivial_edits": [],
+  "content_scope": {
+    "version": 1,
+    "exclusions": []
+  }
+}

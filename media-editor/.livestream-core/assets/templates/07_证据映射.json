@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "source": "inputs/02_带时间码原稿.md",
+  "sections": [
+    {
+      "module_id": "M01",
+      "draft_heading": "01<br>章节标题",
+      "draft_anchor": "填写一段能在成稿中唯一定位的原句",
+      "source_ranges": [
+        {
+          "start": "00:00",
+          "end": "10:00"
+        }
+      ],
+      "key_details": [
+        "具体场景",
+        "关键追问",
+        "人物原词"
+      ],
+      "verification_status": "待回听",
+      "edit_decision_ids": [],
+      "notes": "说明删除、合并、移动或风险处理；无特殊处理也要写明。"
+    }
+  ]
+}

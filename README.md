@@ -1,5 +1,9 @@
 # 直播文稿整理
 
+> 新增试用版：**[文稿整理](media-editor/README.md)**。支持文字、视频、音频和播客等来源；按直播标准整理时，保留原有直播规则并交付待发布稿与待核清单。
+> [下载文稿整理试用包](https://github.com/Jianxmm/livestream-editor/releases/download/media-editor-v0.1.0-beta.1/media-editor-0.1.0-beta.1.zip) · [已验证情况及限制](media-editor/VALIDATION.md)。安装统一版时只安装 `media-editor` 文件夹。下文仍为原直播 Skill 的使用说明，旧版下载继续保留。
+
+
 **把直播回放和已有的转写稿，整理成读得顺、尽量保留原话的文字稿。**
 
 将直播回放和带时间的转写稿，整理成便于阅读的文字稿。保留原来的意思、例子和问答，调整分段、标点和多余的口头词；听不清或拿不准的地方单独列出，方便回听确认。

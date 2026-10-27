@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.DS_Store
+.venv/
+.env
+.env.*
+cases/
+dist/
+*.zip
+models/
+我的文稿资料/
+.local/

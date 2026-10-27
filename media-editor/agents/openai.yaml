@@ -1,0 +1,4 @@
+interface:
+  display_name: "文稿整理"
+  short_description: "整理直播、音视频、播客与文字，保留原意并列出待核问题"
+  default_prompt: "使用 $media-editor 整理我提供的材料，保留重要细节与原意，并单独列出需要核对的内容。"

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "source": "inputs/02_带时间码原稿.md",
+  "speaker_map": {
+    "发言人1": "受访者",
+    "发言人2": "主持人"
+  },
+  "nontrivial_edits": [
+    {
+      "id": "E001",
+      "start": "00:00",
+      "end": "00:00",
+      "type": "ASR语义修复",
+      "source_excerpt": "填写原转写中的连续原文",
+      "draft_excerpt": "填写成稿采用的连续文字；已删除时留空",
+      "basis": "原稿上下文",
+      "confidence": "暂定",
+      "status": "待确认",
+      "notes": "说明为何这样处理，以及对应待核问题"
+    }
+  ],
+  "content_scope": {
+    "version": 1,
+    "exclusions": []
+  }
+}

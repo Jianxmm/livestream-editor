@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "source_audio": "inputs/01_直播回放.mp4",
+  "source_transcript": "inputs/02_带时间码原稿.md",
+  "speaker_count": 2,
+  "method": "填写实际使用的独立说话人分离工具和版本",
+  "calibration_file": "_work/说话人校准.json",
+  "segments": [
+    {
+      "id": "S001",
+      "start": "00:00",
+      "end": "00:15",
+      "raw_cluster": "SPEAKER_00",
+      "speaker_id": "SPK_HOST",
+      "overlap": false
+    }
+  ],
+  "source_blocks": [
+    {
+      "source_start": "00:00",
+      "source_label": "发言人1",
+      "timeline_segment_ids": [
+        "S001"
+      ],
+      "resolved_speaker_id": "SPK_HOST",
+      "status": "一致",
+      "conflict_id": null,
+      "notes": ""
+    }
+  ]
+}
