@@ -9,7 +9,7 @@ from pathlib import Path
 import zipfile
 
 ROOT=Path(__file__).resolve().parent
-WRAPPER=('SKILL.md','README.md','VALIDATION.md','THIRD_PARTY.md','LICENSE','VERSION','agents/openai.yaml','references/general.md','references/acquisition.md',
+WRAPPER=('SKILL.md','README.md','START_HERE.md','examples/整理前后.md','VALIDATION.md','THIRD_PARTY.md','LICENSE','VERSION','agents/openai.yaml','references/general.md','references/acquisition.md',
          'scripts/media_intake.py','build_package.py','install.py','tests/test_install_package.py','tests/test_media_intake.py')
 
 def build(output: Path) -> dict:
